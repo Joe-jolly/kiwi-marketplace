@@ -1,4 +1,5 @@
 import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from '../users/users.service';
 
@@ -17,7 +18,10 @@ interface LoginData {
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
+  ) {}
 
   async register(data: RegisterData) {
     const existingUser = await this.usersService.findByPhone(data.phone);
@@ -51,8 +55,14 @@ export class AuthService {
       throw new UnauthorizedException('Invalid phone or password');
     }
 
-    // TODO: Generate and return JWT after authentication is implemented.
-    return user;
+    const payload = {
+      sub: user.id,
+      phone: user.phone,
+    };
+
+    const accessToken = await this.jwtService.signAsync(payload);
+
+    return { accessToken };
   }
 }
 
