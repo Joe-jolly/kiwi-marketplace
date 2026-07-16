@@ -1,13 +1,34 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import type { User } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt.auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CreatePostDto } from './dto/create-post.dto';
+import { UpdatePostDto } from './dto/update-post.dto';
 import { PostsService } from './posts.service';
 
 @Controller('posts')
 export class PostsController {
   constructor(private readonly postsService: PostsService) {}
+
+  @Get()
+  findAll() {
+    return this.postsService.findAll();
+  }
+
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.postsService.findOne(id);
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  update(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+    @Body() dto: UpdatePostDto,
+  ) {
+    return this.postsService.update(id, user, dto);
+  }
 
   @Post()
   @UseGuards(JwtAuthGuard)

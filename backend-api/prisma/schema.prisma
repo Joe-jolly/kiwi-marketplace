@@ -71,6 +71,7 @@ model Post {
   category   Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
   title       String
+  price       Int
   description String
   details     Json
   latitude    Float

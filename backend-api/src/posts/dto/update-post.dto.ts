@@ -3,43 +3,44 @@ import {
   ArrayMinSize,
   IsArray,
   IsInt,
-  IsNotEmpty,
   IsNumber,
   IsObject,
+  IsOptional,
   IsString,
   IsUrl,
   Min,
 } from 'class-validator';
 
-export class CreatePostDto {
+export class UpdatePostDto {
   @IsString()
-  @IsNotEmpty()
-  categoryId: string;
-
-  @IsString()
-  @IsNotEmpty()
-  title: string;
+  @IsOptional()
+  title?: string;
 
   @IsInt()
   @Min(0)
-  price: number;
+  @IsOptional()
+  price?: number;
 
   @IsString()
-  @IsNotEmpty()
-  description: string;
+  @IsOptional()
+  description?: string;
 
   @IsObject()
-  details: Record<string, unknown>;
+  @IsOptional()
+  details?: Record<string, unknown>;
 
   @IsNumber()
-  latitude: number;
+  @IsOptional()
+  latitude?: number;
 
   @IsNumber()
-  longitude: number;
+  @IsOptional()
+  longitude?: number;
 
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(10)
   @IsUrl({}, { each: true })
-  imageUrls: string[];
+  @IsOptional()
+  imageUrls?: string[];
 }
