@@ -10,6 +10,12 @@ import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { postDetailSelect } from './post.select';
 
+type MutablePostState = {
+  id: string;
+  ownerId: string;
+  status: PostStatus;
+};
+
 @Injectable()
 export class PostsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -82,17 +88,11 @@ export class PostsService {
         },
       });
 
-      if (!post) {
-        throw new NotFoundException('Post not found');
-      }
-
-      if (post.ownerId !== user.id) {
-        throw new ForbiddenException();
-      }
-
-      if (post.status !== PostStatus.ACTIVE) {
-        throw new ConflictException('Only active posts can be updated');
-      }
+      this.assertPostCanBeChanged(
+        post,
+        user,
+        'Only active posts can be updated',
+      );
 
       const data: Prisma.PostUpdateInput = {};
 
@@ -138,6 +138,36 @@ export class PostsService {
     });
   }
 
+  async remove(id: string, user: User) {
+    await this.prisma.$transaction(async (tx) => {
+      const post = await tx.post.findFirst({
+        where: {
+          id,
+          status: PostStatus.ACTIVE,
+        },
+        select: {
+          id: true,
+          ownerId: true,
+        },
+      });
+
+      if (!post) {
+        throw new NotFoundException('Post not found');
+      }
+
+      if (post.ownerId !== user.id) {
+        throw new ForbiddenException();
+      }
+
+      await tx.post.update({
+        where: { id: post.id },
+        data: {
+          status: PostStatus.DELETED,
+        },
+      });
+    });
+  }
+
   async create(user: User, dto: CreatePostDto) {
     return this.prisma.$transaction(async (tx) => {
       const category = await tx.category.findUnique({
@@ -171,5 +201,23 @@ export class PostsService {
         },
       });
     });
+  }
+
+  private assertPostCanBeChanged(
+    post: MutablePostState | null,
+    user: User,
+    inactivePostMessage: string,
+  ): asserts post is MutablePostState {
+    if (!post) {
+      throw new NotFoundException('Post not found');
+    }
+
+    if (post.ownerId !== user.id) {
+      throw new ForbiddenException();
+    }
+
+    if (post.status !== PostStatus.ACTIVE) {
+      throw new ConflictException(inactivePostMessage);
+    }
   }
 }

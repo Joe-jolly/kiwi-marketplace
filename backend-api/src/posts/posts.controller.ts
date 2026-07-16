@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import type { User } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt.auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -28,6 +39,13 @@ export class PostsController {
     @Body() dto: UpdatePostDto,
   ) {
     return this.postsService.update(id, user, dto);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.postsService.remove(id, user);
   }
 
   @Post()

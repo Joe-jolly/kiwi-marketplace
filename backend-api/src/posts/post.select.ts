@@ -34,3 +34,9 @@ export const postDetailSelect = {
     },
   },
 } satisfies Prisma.PostSelect;
+
+export const mutablePostSelect = {
+  id: true,
+  ownerId: true,
+  status: true,
+} satisfies Prisma.PostSelect;
