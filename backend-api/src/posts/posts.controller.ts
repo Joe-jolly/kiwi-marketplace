@@ -8,12 +8,14 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import type { User } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt.auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CreatePostDto } from './dto/create-post.dto';
+import { FindPostsQueryDto } from './dto/find-posts-query.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { PostsService } from './posts.service';
 
@@ -22,8 +24,8 @@ export class PostsController {
   constructor(private readonly postsService: PostsService) {}
 
   @Get()
-  findAll() {
-    return this.postsService.findAll();
+  findAll(@Query() query: FindPostsQueryDto) {
+    return this.postsService.findAll(query);
   }
 
   @Get(':id')

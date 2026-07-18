@@ -7,8 +7,11 @@ import {
 import { PostStatus, type Prisma, type User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePostDto } from './dto/create-post.dto';
+import { FindPostsQueryDto } from './dto/find-posts-query.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
-import { postDetailSelect } from './post.select';
+import { decodeCursor, encodeCursor } from './feed/cursor.util';
+import { FeedQueryBuilder } from './feed/feed-query.builder';
+import { postDetailSelect, postFeedSelect } from './post.select';
 
 type MutablePostState = {
   id: string;
@@ -18,47 +21,36 @@ type MutablePostState = {
 
 @Injectable()
 export class PostsService {
+  private readonly feedQueryBuilder = new FeedQueryBuilder();
+
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
-    return this.prisma.post.findMany({
-      where: {
-        status: PostStatus.ACTIVE,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-      select: {
-        id: true,
-        title: true,
-        price: true,
-        latitude: true,
-        longitude: true,
-        status: true,
-        createdAt: true,
-        owner: {
-          select: {
-            id: true,
-            displayName: true,
-          },
-        },
-        category: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        images: {
-          orderBy: {
-            displayOrder: 'asc',
-          },
-          select: {
-            imageUrl: true,
-            displayOrder: true,
-          },
-        },
-      },
+  async findAll(query: FindPostsQueryDto) {
+    const cursor = decodeCursor(query.cursor);
+
+    const posts = await this.prisma.post.findMany({
+      where: this.feedQueryBuilder.buildWhere(query, cursor),
+      take: this.feedQueryBuilder.buildTake(query.limit),
+      orderBy: this.feedQueryBuilder.buildOrderBy(),
+      select: postFeedSelect,
     });
+
+    const hasNextPage = posts.length > query.limit;
+    const items = hasNextPage ? posts.slice(0, query.limit) : posts;
+    const lastItem = items.at(-1);
+    const nextCursor =
+      hasNextPage && lastItem
+        ? encodeCursor({
+            createdAt: lastItem.createdAt.toISOString(),
+            id: lastItem.id,
+          })
+        : null;
+
+    return {
+      items,
+      nextCursor,
+      hasNextPage,
+    };
   }
 
   async findOne(id: string) {

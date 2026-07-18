@@ -21,7 +21,7 @@ export class UsersService {
       where: { phone },
     });
   }
-  
+
   findById(id: string) {
     return this.prisma.user.findUnique({
       where: { id },
