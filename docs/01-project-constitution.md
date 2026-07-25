@@ -316,8 +316,10 @@ When conflicts occur, the following order applies:
 
 1. Project Constitution
 2. Technical Constitution
-3. Development Constitution
-4. Cursor Operating Manual
-5. Feature Requests
+3. Database Constitution
+4. API Constitution
+5. Development Constitution
+6. Cursor Operating Manual
+7. Feature Requests
 
 The Constitution always wins.

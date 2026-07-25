@@ -73,6 +73,7 @@ Backend:
 Database:
 
 * PostgreSQL
+* PostGIS (spatial extension; see ADR-004)
 
 Realtime:
 
@@ -156,6 +157,8 @@ TypeORM is prohibited.
 
 Raw SQL may be used only when Prisma cannot efficiently solve the problem.
 
+The only currently-approved raw SQL usage is the single, explicitly-bounded geospatial query defined in ADR-004. It does not extend to any other model or operation.
+
 ---
 
 # 8. API Constitution
@@ -218,7 +221,7 @@ bcrypt
 
 User registration requires:
 
-* Email
+* Phone Number
 * Password
 * SMS Verification
 
@@ -320,18 +323,15 @@ Users must always have control over their location settings.
 
 Default Sort Order:
 
-Nearest
-
-↓
-
 Newest
+
+See ADR-004 (Geospatial Feed Architecture) for the authoritative list of supported sort modes.
 
 Search Sources:
 
 * Title
 * Description
 * Category
-* JSONB Details
 
 Search logic belongs to the backend.
 
@@ -551,9 +551,11 @@ Priority Order:
 
 1. Project Constitution
 2. Technical Constitution
-3. Development Constitution
-4. Cursor Operating Manual
-5. Individual Feature Requests
+3. Database Constitution
+4. API Constitution
+5. Development Constitution
+6. Cursor Operating Manual
+7. Individual Feature Requests
 
 The Constitution always wins.
 

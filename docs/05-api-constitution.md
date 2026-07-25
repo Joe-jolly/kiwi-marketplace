@@ -43,6 +43,8 @@ Future versions:
 
 Versioning is mandatory.
 
+Rollout of the versioned base path to already-shipped endpoints is tracked in ROADMAP.md / BACKLOG.md; this rule is binding for all new and existing routes going forward.
+
 ---
 
 # 3. HTTP Methods Constitution
@@ -121,6 +123,14 @@ Error Response:
 "message": "Human readable error message"
 }
 
+Cursor-paginated list endpoints (for example, the feed) use the following response contract instead of the generic List Response shape above, consistent with the cursor pagination model defined in ADR-004:
+
+{
+"items": [],
+"nextCursor": "string | null",
+"hasNextPage": true
+}
+
 Consistency is mandatory.
 
 ---
@@ -188,39 +198,23 @@ Pagination Type:
 
 Cursor Pagination
 
-Primary Cursor:
+Cursor fields are sort-mode-specific and opaque to the client. See ADR-004 (Geospatial Feed Architecture) for the authoritative cursor strategy per sort mode.
 
-created_at
-
-Secondary Cursor:
-
-id
+A cursor issued for one sort mode is invalid for any other sort mode and must be rejected if reused across a sort-mode change.
 
 Reason:
 
-Stable performance.
+Deterministic, duplicate-free, complete pagination for every sort mode.
 
 ---
 
 # 10. Sorting Constitution
 
-Supported Sort Types:
-
-nearest
-
-newest
-
-oldest
-
-Default:
-
-nearest
-
-↓
-
-newest
+Supported sort types and the default sort are defined authoritatively in ADR-004 (Geospatial Feed Architecture). This Constitution does not restate them, to prevent the two documents from drifting out of sync.
 
 Sorting logic belongs to the backend.
+
+Sorting logic must never be duplicated in the frontend.
 
 ---
 
@@ -248,7 +242,6 @@ Search Sources:
 * Title
 * Description
 * Category
-* JSONB Details
 
 Search must support:
 
@@ -506,6 +499,8 @@ Swagger
 Swagger generation is mandatory.
 
 The API documentation must always reflect the current implementation.
+
+Rollout of Swagger documentation to already-shipped endpoints is tracked in BACKLOG.md; this rule is binding for all new endpoints going forward.
 
 ---
 

@@ -63,3 +63,7 @@
 - [ ] Review module boundaries before production.
 - [ ] Review DTO validation rules.
 - [ ] Review error messages for consistency.
+
+## Restoring DELETED posts
+
+- [ ] Add `deletedAt DateTime?` to `Post` to record deletion time and support future restore, retention policies, and automated cleanup jobs.

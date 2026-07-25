@@ -22,13 +22,13 @@ Frontend caches, local storage, and device memory are temporary layers and must 
 
 Database:
 
-PostgreSQL
+PostgreSQL, with the PostGIS extension enabled (see ADR-004)
 
 ORM:
 
 Prisma
 
-Database access must occur through Prisma.
+Database access must occur through Prisma, with one explicitly-bounded exception: the single geospatial query defined in ADR-004, which uses parameterized raw SQL because Prisma has no native mapping for PostGIS geography columns. This exception is scoped exclusively to that query and does not extend to any other model or operation.
 
 Direct database access from the frontend is prohibited.
 
@@ -431,7 +431,6 @@ Search Sources:
 * Post Title
 * Post Description
 * Category Name
-* JSONB Details
 
 Search must be case-insensitive.
 
@@ -478,6 +477,7 @@ Posts
 * category_id
 * status
 * created_at
+* GiST spatial index on the geography location column (see ADR-004)
 
 Chats
 
@@ -515,7 +515,7 @@ UNIQUE(post_id, participant_id)
 
 Users:
 
-UNIQUE(email)
+UNIQUE(phone)
 
 Categories:
 
