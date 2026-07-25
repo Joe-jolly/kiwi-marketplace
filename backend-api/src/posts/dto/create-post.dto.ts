@@ -8,6 +8,7 @@ import {
   IsObject,
   IsString,
   IsUrl,
+  Max,
   Min,
 } from 'class-validator';
 
@@ -32,9 +33,13 @@ export class CreatePostDto {
   details: Record<string, unknown>;
 
   @IsNumber()
+  @Min(-90)
+  @Max(90)
   latitude: number;
 
   @IsNumber()
+  @Min(-180)
+  @Max(180)
   longitude: number;
 
   @IsArray()

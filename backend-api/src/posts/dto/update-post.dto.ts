@@ -1,15 +1,23 @@
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsDefined,
   IsInt,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
   IsUrl,
+  Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
+
+function isLocationUpdateRequired(dto: UpdatePostDto): boolean {
+  return dto.latitude !== undefined || dto.longitude !== undefined;
+}
 
 export class UpdatePostDto {
   @IsString()
@@ -29,12 +37,23 @@ export class UpdatePostDto {
   @IsOptional()
   details?: Record<string, unknown>;
 
+  // Location updates are all-or-nothing: supplying either coordinate requires
+  // both, so the generated PostGIS `location` column cannot drift to a
+  // half-updated point.
+  @ValidateIf(isLocationUpdateRequired)
+  @IsDefined()
+  @Type(() => Number)
   @IsNumber()
-  @IsOptional()
+  @Min(-90)
+  @Max(90)
   latitude?: number;
 
+  @ValidateIf(isLocationUpdateRequired)
+  @IsDefined()
+  @Type(() => Number)
   @IsNumber()
-  @IsOptional()
+  @Min(-180)
+  @Max(180)
   longitude?: number;
 
   @IsArray()
