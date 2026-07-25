@@ -78,6 +78,10 @@ model Post {
   longitude   Float
   status      PostStatus @default(ACTIVE)
 
+  // Set when status transitions to DELETED; cleared on restore. Null means
+  // the post has never been soft-deleted (or was restored).
+  deletedAt DateTime?
+
   // Derived, generated column (see ADR-004: Geospatial Feed Architecture).
   // Always computed by the database from `latitude`/`longitude`; never
   // written to by Prisma Client. The generated-column expression and its
@@ -95,11 +99,12 @@ model Post {
   @@index([ownerId])
   @@index([categoryId])
   @@index([status])
+  @@index([ownerId, status, deletedAt])
 }
 
 model PostImage {
   postId String
-  post   Post   @relation(fields: [postId], references: [id])
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   imageUrl     String
   displayOrder Int
