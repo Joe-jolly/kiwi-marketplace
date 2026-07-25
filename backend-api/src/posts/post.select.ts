@@ -40,6 +40,7 @@ export const postDetailSelect = {
   latitude: true,
   longitude: true,
   status: true,
+  deletedAt: true,
   createdAt: true,
   updatedAt: true,
   owner: {

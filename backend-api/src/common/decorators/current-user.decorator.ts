@@ -3,10 +3,10 @@ import type { User } from '@prisma/client';
 import type { Request } from 'express';
 
 export const CurrentUser = createParamDecorator(
-  (_data: unknown, context: ExecutionContext): User => {
+  (_data: unknown, context: ExecutionContext): User | undefined => {
     const request = context
       .switchToHttp()
-      .getRequest<Request & { user: User }>();
+      .getRequest<Request & { user?: User }>();
 
     return request.user;
   },

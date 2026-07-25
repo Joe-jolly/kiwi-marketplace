@@ -2,7 +2,7 @@
 
 ## Database
 
-- [ ] Add `onDelete: Cascade` to `PostImage -> Post` relation and create a migration.
+- [x] Add `onDelete: Cascade` to `PostImage -> Post` relation and create a migration.
 - [ ] Review all relation `onDelete` behaviors before production release.
 - [ ] Add composite index for location-based search after implementing distance filter.
 
@@ -21,7 +21,7 @@
 - [ ] Replace image URLs with Cloudflare R2 upload flow.
 - [ ] Validate `details` against `Category.schema` before creating a post.
 - [ ] Add ownership check before Update/Delete endpoints.
-- [ ] Implement soft delete.
+- [x] Implement soft delete.
 
 ## Posts Feed
 
@@ -66,4 +66,6 @@
 
 ## Restoring DELETED posts
 
-- [ ] Add `deletedAt DateTime?` to `Post` to record deletion time and support future restore, retention policies, and automated cleanup jobs.
+- [x] Add `deletedAt DateTime?` to `Post` to record deletion time and support future restore, retention policies, and automated cleanup jobs.
+- [x] Owner restore within 30 days (`POST /posts/:id/restorations`).
+- [x] Owner listing of restorable deleted posts (`GET /posts/me`).

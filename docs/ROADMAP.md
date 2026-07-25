@@ -44,11 +44,11 @@
 
 ### Schema Improvements
 
-- [ ] Fix PostImage Cascade Delete
-- [ ] Resolve deletedAt Strategy
-- [ ] Validate Latitude Range
-- [ ] Validate Longitude Range
-- [ ] Enforce Atomic Location Update
+- [x] Fix PostImage Cascade Delete
+- [x] Resolve deletedAt Strategy
+- [x] Validate Latitude Range
+- [x] Validate Longitude Range
+- [x] Enforce Atomic Location Update
 
 ---
 

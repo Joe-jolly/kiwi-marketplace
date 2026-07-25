@@ -1,10 +1,11 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PostStatus, type Prisma, type User } from '@prisma/client';
+import { PostStatus, UserRole, type Prisma, type User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { FindPostsQueryDto } from './dto/find-posts-query.dto';
@@ -19,6 +20,9 @@ import { FeedQueryBuilder } from './feed/feed-query.builder';
 import { GeoFeedQueryBuilder, GeoFeedRow } from './feed/geo-feed-query.builder';
 import { SortOption } from './feed/sort-option.enum';
 import { postDetailSelect, postFeedSelect } from './post.select';
+
+/** Owner restore window for soft-deleted posts (product rule). */
+const RESTORE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 type MutablePostState = {
   id: string;
@@ -52,6 +56,30 @@ export class PostsService {
     return this.hasLocationParams(query)
       ? this.findAllWithDistanceFilter(query, cursor)
       : this.findAllDbNative(query, cursor);
+  }
+
+  /**
+   * Owner's posts: every non-DELETED status, plus DELETED posts still inside
+   * the 30-day restore window. Older soft-deleted posts are hidden from the
+   * owner UI but remain in the database.
+   */
+  async findMine(user: User) {
+    const restoreWindowStart = new Date(Date.now() - RESTORE_WINDOW_MS);
+
+    return this.prisma.post.findMany({
+      where: {
+        ownerId: user.id,
+        OR: [
+          { status: { not: PostStatus.DELETED } },
+          {
+            status: PostStatus.DELETED,
+            deletedAt: { gte: restoreWindowStart },
+          },
+        ],
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: postDetailSelect,
+    });
   }
 
   /**
@@ -200,12 +228,13 @@ export class PostsService {
     );
   }
 
-  async findOne(id: string) {
-    const post = await this.prisma.post.findFirst({
-      where: {
-        id,
-        status: PostStatus.ACTIVE,
-      },
+  /**
+   * Public callers only see ACTIVE posts. ADMIN callers may also read
+   * soft-deleted (and other non-ACTIVE) posts for moderation/audit.
+   */
+  async findOne(id: string, viewer?: User) {
+    const post = await this.prisma.post.findUnique({
+      where: { id },
       select: postDetailSelect,
     });
 
@@ -213,10 +242,17 @@ export class PostsService {
       throw new NotFoundException('Post not found');
     }
 
+    const isAdmin = viewer?.role === UserRole.ADMIN;
+    if (post.status !== PostStatus.ACTIVE && !isAdmin) {
+      throw new NotFoundException('Post not found');
+    }
+
     return post;
   }
 
   async update(id: string, user: User, dto: UpdatePostDto) {
+    this.assertLocationUpdateIsAtomic(dto);
+
     return this.prisma.$transaction(async (tx) => {
       const post = await tx.post.findUnique({
         where: { id },
@@ -251,11 +287,8 @@ export class PostsService {
         data.details = dto.details as Prisma.InputJsonValue;
       }
 
-      if (dto.latitude !== undefined) {
+      if (dto.latitude !== undefined && dto.longitude !== undefined) {
         data.latitude = dto.latitude;
-      }
-
-      if (dto.longitude !== undefined) {
         data.longitude = dto.longitude;
       }
 
@@ -302,7 +335,52 @@ export class PostsService {
         where: { id: post.id },
         data: {
           status: PostStatus.DELETED,
+          deletedAt: new Date(),
         },
+      });
+    });
+  }
+
+  /**
+   * Owner restore within the 30-day window. Clears `deletedAt` and returns
+   * the post to ACTIVE. Expired restores are rejected with 403.
+   */
+  async restore(id: string, user: User) {
+    return this.prisma.$transaction(async (tx) => {
+      const post = await tx.post.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          ownerId: true,
+          status: true,
+          deletedAt: true,
+        },
+      });
+
+      if (!post) {
+        throw new NotFoundException('Post not found');
+      }
+
+      if (post.ownerId !== user.id) {
+        throw new ForbiddenException();
+      }
+
+      if (post.status !== PostStatus.DELETED || !post.deletedAt) {
+        throw new ConflictException('Only deleted posts can be restored');
+      }
+
+      const restoreDeadline = post.deletedAt.getTime() + RESTORE_WINDOW_MS;
+      if (Date.now() > restoreDeadline) {
+        throw new ForbiddenException('Restore window has expired');
+      }
+
+      return tx.post.update({
+        where: { id: post.id },
+        data: {
+          status: PostStatus.ACTIVE,
+          deletedAt: null,
+        },
+        select: postDetailSelect,
       });
     });
   }
@@ -340,6 +418,17 @@ export class PostsService {
         },
       });
     });
+  }
+
+  private assertLocationUpdateIsAtomic(dto: UpdatePostDto) {
+    const hasLatitude = dto.latitude !== undefined;
+    const hasLongitude = dto.longitude !== undefined;
+
+    if (hasLatitude !== hasLongitude) {
+      throw new BadRequestException(
+        'latitude and longitude must be updated together',
+      );
+    }
   }
 
   private assertPostCanBeChanged(

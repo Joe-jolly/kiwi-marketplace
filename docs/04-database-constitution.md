@@ -197,6 +197,12 @@ Soft deleted.
 
 Hard delete is prohibited.
 
+Soft-delete metadata:
+
+* `Post.deletedAt` is set to the deletion timestamp when status becomes `deleted`
+* `Post.deletedAt` is cleared (`null`) when the owner restores the post within the restore window
+* The post row and its images remain in the database after soft delete
+
 ---
 
 # 8. Dynamic Details Constitution

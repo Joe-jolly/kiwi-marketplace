@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import type { User } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt.auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/optional-jwt.auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CreatePostDto } from './dto/create-post.dto';
 import { FindPostsQueryDto } from './dto/find-posts-query.dto';
@@ -28,9 +29,17 @@ export class PostsController {
     return this.postsService.findAll(query);
   }
 
+  // Registered before `:id` so "me" is not captured as a post id.
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  findMine(@CurrentUser() user: User) {
+    return this.postsService.findMine(user);
+  }
+
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.postsService.findOne(id);
+  @UseGuards(OptionalJwtAuthGuard)
+  findOne(@Param('id') id: string, @CurrentUser() user?: User) {
+    return this.postsService.findOne(id, user);
   }
 
   @Patch(':id')
@@ -48,6 +57,12 @@ export class PostsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id') id: string, @CurrentUser() user: User) {
     return this.postsService.remove(id, user);
+  }
+
+  @Post(':id/restorations')
+  @UseGuards(JwtAuthGuard)
+  restore(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.postsService.restore(id, user);
   }
 
   @Post()
