@@ -78,6 +78,15 @@ model Post {
   longitude   Float
   status      PostStatus @default(ACTIVE)
 
+  // Derived, generated column (see ADR-004: Geospatial Feed Architecture).
+  // Always computed by the database from `latitude`/`longitude`; never
+  // written to by Prisma Client. The generated-column expression and its
+  // GiST index are defined by hand in the migration SQL, since Prisma
+  // cannot express generated columns natively — this is the one field
+  // application code accesses only through the single sanctioned raw SQL
+  // query described in ADR-004.
+  location Unsupported("geography(Point, 4326)")?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

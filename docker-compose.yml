@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: kiwi-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kiwi
+      POSTGRES_PASSWORD: kiwi_dev_password
+      POSTGRES_DB: kiwi_marketplace
+    ports:
+      - '5433:5432'
+    volumes:
+      - kiwi_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U kiwi -d kiwi_marketplace']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  kiwi_postgres_data:
