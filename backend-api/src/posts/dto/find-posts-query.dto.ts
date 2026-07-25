@@ -1,12 +1,27 @@
 import { Transform, Type, type TransformFnParams } from 'class-transformer';
 import {
+  IsDefined,
+  IsEnum,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
+  IsPositive,
   IsString,
   Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
+import { SortOption } from '../feed/sort-option.enum';
+
+function isLocationRequired(query: FindPostsQueryDto): boolean {
+  return (
+    query.latitude !== undefined ||
+    query.longitude !== undefined ||
+    query.radius !== undefined ||
+    query.sort === SortOption.NEAREST
+  );
+}
 
 export class FindPostsQueryDto {
   @IsString()
@@ -33,4 +48,34 @@ export class FindPostsQueryDto {
   @Max(50)
   @IsOptional()
   limit = 20;
+
+  @IsEnum(SortOption)
+  @IsOptional()
+  sort: SortOption = SortOption.NEWEST;
+
+  // Location parameters are all-or-nothing, and are mandatory when sort=NEAREST
+  // is requested. @ValidateIf (rather than @IsOptional) ensures a missing field
+  // still fails validation whenever the group is required.
+  @ValidateIf(isLocationRequired)
+  @IsDefined()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  latitude?: number;
+
+  @ValidateIf(isLocationRequired)
+  @IsDefined()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  longitude?: number;
+
+  @ValidateIf(isLocationRequired)
+  @IsDefined()
+  @Type(() => Number)
+  @IsNumber()
+  @IsPositive()
+  radius?: number;
 }

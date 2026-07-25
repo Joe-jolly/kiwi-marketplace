@@ -9,8 +9,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { FindPostsQueryDto } from './dto/find-posts-query.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
-import { decodeCursor, encodeCursor } from './feed/cursor.util';
+import {
+  CursorFields,
+  decodeCursor,
+  encodeCursor,
+  FeedCursor,
+} from './feed/cursor.util';
 import { FeedQueryBuilder } from './feed/feed-query.builder';
+import { GeoFeedQueryBuilder, GeoFeedRow } from './feed/geo-feed-query.builder';
+import { SortOption } from './feed/sort-option.enum';
 import { postDetailSelect, postFeedSelect } from './post.select';
 
 type MutablePostState = {
@@ -19,38 +26,178 @@ type MutablePostState = {
   status: PostStatus;
 };
 
+type FeedRow = Prisma.PostGetPayload<{ select: typeof postFeedSelect }>;
+// `distance` is attached only on the location-present (PostGIS) path, from
+// `GeoFeedRow.distanceMeters`, and is stripped before the response is
+// returned (the spec forbids exposing it during MVP).
+type FeedItem = FeedRow & { distance?: number };
+
+type LocationQuery = FindPostsQueryDto & {
+  latitude: number;
+  longitude: number;
+  radius: number;
+};
+
 @Injectable()
 export class PostsService {
-  private readonly feedQueryBuilder = new FeedQueryBuilder();
-
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly feedQueryBuilder: FeedQueryBuilder,
+    private readonly geoFeedQueryBuilder: GeoFeedQueryBuilder,
+  ) {}
 
   async findAll(query: FindPostsQueryDto) {
-    const cursor = decodeCursor(query.cursor);
+    const cursor = decodeCursor(query.cursor, query.sort);
 
-    const posts = await this.prisma.post.findMany({
-      where: this.feedQueryBuilder.buildWhere(query, cursor),
+    return this.hasLocationParams(query)
+      ? this.findAllWithDistanceFilter(query, cursor)
+      : this.findAllDbNative(query, cursor);
+  }
+
+  /**
+   * DB-native path: no location parameters, so search + category + cursor
+   * pagination can all be pushed down into a single Prisma query, exactly
+   * like the pre-Feed-V2 implementation (now sort-aware).
+   */
+  private async findAllDbNative(query: FindPostsQueryDto, cursor?: FeedCursor) {
+    const baseWhere = this.feedQueryBuilder.buildWhere(query);
+    const cursorWhere = this.feedQueryBuilder.buildCursorWhere(cursor);
+
+    const rows = await this.prisma.post.findMany({
+      where: cursorWhere ? { AND: [baseWhere, cursorWhere] } : baseWhere,
+      orderBy: this.feedQueryBuilder.buildOrderBy(query.sort),
       take: this.feedQueryBuilder.buildTake(query.limit),
-      orderBy: this.feedQueryBuilder.buildOrderBy(),
       select: postFeedSelect,
     });
 
-    const hasNextPage = posts.length > query.limit;
-    const items = hasNextPage ? posts.slice(0, query.limit) : posts;
+    const hasNextPage = rows.length > query.limit;
+    const items = hasNextPage ? rows.slice(0, query.limit) : rows;
+
+    return this.buildResponse(items, query.sort, hasNextPage);
+  }
+
+  /**
+   * PostGIS-native path: location parameters are present (required whenever
+   * sort=NEAREST, optional otherwise per the Compatibility Rules). Filtering,
+   * radius containment, sort-aware ordering, and cursor continuation are all
+   * pushed down into the single raw SQL query built by `GeoFeedQueryBuilder`
+   * (ADR-004: Geospatial Feed Architecture) — one database round trip for
+   * the page, exactly like the no-location path.
+   */
+  private async findAllWithDistanceFilter(
+    query: LocationQuery,
+    cursor?: FeedCursor,
+  ) {
+    const sql = this.geoFeedQueryBuilder.build(query, cursor);
+    const rows = await this.prisma.$queryRaw<GeoFeedRow[]>(sql);
+
+    const hasNextPage = rows.length > query.limit;
+    const pageRows = hasNextPage ? rows.slice(0, query.limit) : rows;
+    const items = await this.hydrateImages(pageRows);
+
+    return this.buildResponse(items, query.sort, hasNextPage);
+  }
+
+  /**
+   * Reshapes the flat `GeoFeedRow`s from the raw SQL query into the same
+   * `FeedItem` shape (`postFeedSelect` + `distance`) the no-location Prisma
+   * path produces, and attaches `images` via one additional query keyed by
+   * the page's post ids — see ADR-004 / the V3 implementation plan's "One
+   * Query Per Page" clarification: this batched lookup, not the page query
+   * itself, is how the one-to-many `images` collection is populated.
+   */
+  private async hydrateImages(rows: GeoFeedRow[]): Promise<FeedItem[]> {
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const images = await this.prisma.postImage.findMany({
+      where: { postId: { in: rows.map((row) => row.id) } },
+      orderBy: { displayOrder: 'asc' },
+      select: { postId: true, imageUrl: true, displayOrder: true },
+    });
+
+    const imagesByPostId = new Map<
+      string,
+      { imageUrl: string; displayOrder: number }[]
+    >();
+    for (const image of images) {
+      const postImages = imagesByPostId.get(image.postId) ?? [];
+      postImages.push({
+        imageUrl: image.imageUrl,
+        displayOrder: image.displayOrder,
+      });
+      imagesByPostId.set(image.postId, postImages);
+    }
+
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      price: row.price,
+      latitude: row.latitude,
+      longitude: row.longitude,
+      status: row.status,
+      createdAt: row.createdAt,
+      owner: { id: row.ownerId, displayName: row.ownerDisplayName },
+      category: { id: row.categoryId, name: row.categoryName },
+      images: imagesByPostId.get(row.id) ?? [],
+      distance: row.distanceMeters,
+    }));
+  }
+
+  private buildResponse(
+    items: FeedItem[],
+    sort: SortOption,
+    hasNextPage: boolean,
+  ) {
     const lastItem = items.at(-1);
     const nextCursor =
       hasNextPage && lastItem
-        ? encodeCursor({
-            createdAt: lastItem.createdAt.toISOString(),
-            id: lastItem.id,
-          })
+        ? encodeCursor(this.toCursorFields(lastItem, sort))
         : null;
 
     return {
-      items,
+      items: items.map((item) => this.omitDistance(item)),
       nextCursor,
       hasNextPage,
     };
+  }
+
+  // The spec forbids exposing the computed distance in the MVP response,
+  // even though it's needed internally for filtering, sorting, and cursors.
+  private omitDistance(item: FeedItem): FeedRow {
+    const post = { ...item };
+    delete post.distance;
+    return post;
+  }
+
+  /** Builds the public, sort-aware pagination cursor for the last item of a page. */
+  private toCursorFields(item: FeedItem, sort: SortOption): CursorFields {
+    switch (sort) {
+      case SortOption.NEWEST:
+        return {
+          sort: SortOption.NEWEST,
+          sortValue: item.createdAt.toISOString(),
+          id: item.id,
+        };
+      case SortOption.PRICE_ASC:
+      case SortOption.PRICE_DESC:
+        return { sort, sortValue: item.price, id: item.id };
+      case SortOption.NEAREST:
+        return {
+          sort: SortOption.NEAREST,
+          sortValue: item.distance ?? 0,
+          id: item.id,
+        };
+    }
+  }
+
+  private hasLocationParams(query: FindPostsQueryDto): query is LocationQuery {
+    return (
+      query.latitude !== undefined &&
+      query.longitude !== undefined &&
+      query.radius !== undefined
+    );
   }
 
   async findOne(id: string) {

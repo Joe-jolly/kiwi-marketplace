@@ -1,49 +1,97 @@
 import { BadRequestException } from '@nestjs/common';
+import { SortOption } from './sort-option.enum';
 
 const CURSOR_VERSION = 1;
 
-export interface FeedCursor {
-  v: typeof CURSOR_VERSION;
-  createdAt: string;
+interface NewestCursorFields {
+  sort: SortOption.NEWEST;
+  sortValue: string; // ISO createdAt
   id: string;
 }
 
-export function encodeCursor(input: Omit<FeedCursor, 'v'>): string {
-  const payload: FeedCursor = {
-    v: CURSOR_VERSION,
-    createdAt: input.createdAt,
-    id: input.id,
-  };
+interface PriceCursorFields {
+  sort: SortOption.PRICE_ASC | SortOption.PRICE_DESC;
+  sortValue: number; // price
+  id: string;
+}
+
+interface NearestCursorFields {
+  sort: SortOption.NEAREST;
+  sortValue: number; // distance
+  id: string;
+}
+
+// Discriminated on `sort`, so `sortValue`'s type is guaranteed to match
+// whichever field the active sorting mode paginates on.
+export type CursorFields =
+  | NewestCursorFields
+  | PriceCursorFields
+  | NearestCursorFields;
+
+export type FeedCursor = CursorFields & { v: typeof CURSOR_VERSION };
+
+export function encodeCursor(input: CursorFields): string {
+  const payload: FeedCursor = { v: CURSOR_VERSION, ...input };
 
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
 }
 
-export function decodeCursor(cursor?: string): FeedCursor | undefined {
+export function decodeCursor(
+  cursor: string | undefined,
+  requestedSort: SortOption,
+): FeedCursor | undefined {
   if (!cursor) {
     return undefined;
   }
 
+  let payload: Partial<FeedCursor>;
+
   try {
-    const payload = JSON.parse(
+    payload = JSON.parse(
       Buffer.from(cursor, 'base64').toString('utf8'),
     ) as Partial<FeedCursor>;
-
-    if (
-      payload.v !== CURSOR_VERSION ||
-      typeof payload.createdAt !== 'string' ||
-      Number.isNaN(Date.parse(payload.createdAt)) ||
-      typeof payload.id !== 'string' ||
-      payload.id.length === 0
-    ) {
-      throw new Error('Invalid cursor payload');
-    }
-
-    return {
-      v: CURSOR_VERSION,
-      createdAt: payload.createdAt,
-      id: payload.id,
-    };
   } catch {
     throw new BadRequestException('Invalid cursor');
+  }
+
+  if (!isValidCursorPayload(payload)) {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  if (payload.sort !== requestedSort) {
+    throw new BadRequestException(
+      'Cursor does not match requested sorting strategy.',
+    );
+  }
+
+  return payload;
+}
+
+function isValidCursorPayload(
+  payload: Partial<FeedCursor>,
+): payload is FeedCursor {
+  if (payload.v !== CURSOR_VERSION) {
+    return false;
+  }
+
+  if (typeof payload.id !== 'string' || payload.id.length === 0) {
+    return false;
+  }
+
+  switch (payload.sort) {
+    case SortOption.NEWEST:
+      return (
+        typeof payload.sortValue === 'string' &&
+        !Number.isNaN(Date.parse(payload.sortValue))
+      );
+    case SortOption.PRICE_ASC:
+    case SortOption.PRICE_DESC:
+    case SortOption.NEAREST:
+      return (
+        typeof payload.sortValue === 'number' &&
+        Number.isFinite(payload.sortValue)
+      );
+    default:
+      return false;
   }
 }
