@@ -102,12 +102,12 @@
 
 ## Phase 6 - Marketplace Experience
 
-- [ ] Search
-- [ ] Category Filter
-- [ ] Distance Filter
-- [ ] Feed Sorting
-- [ ] Search Ranking
-- [ ] pg_trgm Search Optimization
+- [x] Search
+- [x] Category Filter
+- [x] Distance Filter
+- [x] Feed Sorting
+- [x] Search Ranking
+- [x] pg_trgm Search Optimization
 
 ---
 

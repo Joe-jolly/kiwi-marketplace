@@ -2,11 +2,15 @@
 
 ## Status
 
-Accepted
+Accepted (amended)
 
 ## Date
 
 2026-07-23
+
+## Amendments
+
+- 2026-08-01 — Added `RELEVANCE` as a supported sort mode, gated on `search`, per Decision Record `DR-PHASE6-SEARCH-RANKING-001`. See "Amendment: Search Ranking (RELEVANCE)" below. Business Rules 4, 5, and 10 are updated accordingly; a new Business Rule 11 is added.
 
 ---
 
@@ -96,17 +100,19 @@ These rules govern feed and search behavior and hold regardless of the underlyin
 1. Location query parameters (`latitude`, `longitude`, `radius`) are all-or-nothing: if any one is supplied, all three must be supplied.
 2. Requesting nearest-first sorting requires location parameters; requesting it without them is a validation error.
 3. Radius is expressed in meters.
-4. Supported sort modes are: newest-first (default), price ascending, price descending, and nearest-first.
+4. Supported sort modes are: newest-first (default), price ascending, price descending, nearest-first, and relevance (`RELEVANCE`, added by amendment — see "Amendment: Search Ranking (RELEVANCE)" below).
 5. Every sort mode has a fixed, deterministic tie-break field so that no two listings ever compare as equal:
    - Newest-first: `createdAt` descending, then `id` descending.
    - Price ascending: `price` ascending, then `id` ascending.
    - Price descending: `price` descending, then `id` descending.
    - Nearest-first: distance ascending, then `id` ascending.
+   - Relevance: relevance score descending, then `id` descending.
 6. Cursors are sort-mode-specific and opaque. A cursor issued for one sort mode is rejected as invalid if used against a request for a different sort mode.
 7. Filters are applied in a fixed precedence: status, then category, then search, then location, then sort.
 8. Pagination never produces duplicate records and never omits a record that matches the requested filters, at any page depth.
 9. Computed distance is not included in API responses.
-10. Search matches case-insensitively against listing title, description, and category name.
+10. Search matches case-insensitively against listing title, description, and category name. Search is always applied as a filter, regardless of sort mode. It additionally drives ordering only when `sort=RELEVANCE`; for every other sort mode, search narrows the result set but never changes result order.
+11. Requesting relevance sorting (`sort=RELEVANCE`) requires a non-empty `search` term; requesting it without one is a validation error, mirroring Business Rule 2's treatment of nearest-first and location. Computed relevance score is not included in API responses, mirroring Business Rule 9's treatment of distance.
 
 ---
 
@@ -132,7 +138,42 @@ These rules govern feed and search behavior and hold regardless of the underlyin
 - Listing categories without a fixed physical location (for example, remote services) may require `location` to become nullable.
 - Categories that require area or boundary matching (for example, neighborhood-bounded housing search) may require polygon-based queries in addition to point-radius search.
 - If Kiwi expands into new regions, `location` provides a natural, business-aligned basis for future data partitioning.
-- Keyword search relevance and performance are a separate concern from geospatial search and are addressed independently of this decision.
+- Keyword search relevance ordering is addressed by the amendment below. The relevance *score formula* (e.g. trigram similarity via `pg_trgm`) remains a separate, independently-scheduled optimization; this amendment freezes the contract (sort mode, validation, cursor, response shape) without freezing the formula.
+
+---
+
+## Amendment: Search Ranking (RELEVANCE)
+
+### Context
+
+Phase 6 (Marketplace Experience) requires ranking search results by relevance rather than only filtering by keyword. Prior to this amendment, `search` was filter-only: it narrowed the result set but never affected order, and the feed always ordered by `NEWEST`, `PRICE_ASC`, `PRICE_DESC`, or `NEAREST`.
+
+This amendment was made via Category B decision `DR-PHASE6-SEARCH-RANKING-001` (Step 1 of the Phase 6 Search Ranking work), after evaluating five candidate architectures: an explicit `sort=RELEVANCE` mode, an implicit relevance override when `search` is present, a separate ranking endpoint, an always-on hybrid relevance/distance/freshness score, and client-side re-ranking.
+
+### Decision
+
+Kiwi adds `RELEVANCE` as a fifth, explicit sort mode, following exactly the same architectural pattern `NEAREST` already established for a sort mode with a precondition and a non-column ordering key:
+
+- `sort=RELEVANCE` requires a non-empty `search` term, exactly as `sort=NEAREST` requires location parameters (Business Rule 11, mirroring Business Rule 2).
+- Ordering is relevance score descending, then `id` descending (Business Rule 5), exactly as deterministic and pagination-safe as every other sort mode.
+- The relevance score is computed and indexed by the database, never in application code, consistent with this ADR's existing treatment of distance.
+- The relevance score is never included in API responses (Business Rule 11, mirroring Business Rule 9's treatment of distance).
+- For every sort mode other than `RELEVANCE`, `search` continues to behave exactly as it does today: a filter only, with zero effect on ordering (Business Rule 10).
+
+### Rejected alternatives
+
+- **Implicit relevance when `search` is present** — rejected because it would make the `sort` parameter's meaning context-dependent (silently overridden by the presence of another parameter), which conflicts with `sort` being an explicit, self-describing parameter everywhere else in this ADR, and would make "search with `sort=PRICE_ASC`" ambiguous.
+- **Separate ranking endpoint** — rejected because it would duplicate the filter, pagination, and cursor infrastructure this ADR already establishes for a single unified feed query, splitting one product surface into two independently-maintained pipelines.
+- **Always-on hybrid score (relevance × distance × freshness)** — rejected as premature: it conflates multiple independent concerns this ADR and the Search/Sorting Constitutions treat as orthogonal (Business Rule 7's filter/sort precedence), and is significantly harder to specify a deterministic tie-break for.
+- **Client-side re-ranking** — rejected outright: it violates the Technical and API Constitutions' requirement that sorting and search execution belong to the backend.
+
+### Consequences of this amendment
+
+- `SortOption`, the cursor discriminant, and both query-execution paths (Prisma no-location, raw-SQL location) each gain one new case, following the existing per-sort-mode pattern rather than introducing a new pattern.
+- The exact relevance score formula is intentionally not frozen by this amendment (see Future Considerations) so that a later `pg_trgm`-backed implementation does not require a second product decision — only an engineering one, provided it stays deterministic and monotonic with match quality.
+- No existing sort mode, filter, cursor, or response field changes as a result of this amendment.
+
+See `docs/specifications/search-ranking-v1-spec.md` for the full implementation-grade contract (validation, cursor payload, query-path behavior).
 
 ---
 

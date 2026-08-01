@@ -95,6 +95,8 @@ Unchanged from ADR-004 Business Rule 5 — restated here as the exact ordering e
 
 Every sort mode's ordering must be fully deterministic — no two rows may ever compare as equal — so that cursor pagination cannot skip or duplicate a record.
 
+> **Amendment note:** A fifth sort mode, `RELEVANCE`, was added after this specification was written, via an ADR-004 amendment. It is not part of the original V3 scope (see Non-Goals below) and is fully specified in `docs/specifications/search-ranking-v1-spec.md`, not here.
+
 ---
 
 # Cursor Pagination
@@ -115,6 +117,8 @@ A cursor issued under one sort mode remains invalid under any other sort mode. T
 # Search
 
 Case-insensitive partial match against `title`, `description`, and `category.name` only — no JSON fields, per ADR-004 Business Rule 10. This must be expressed identically in both execution paths: as a Prisma `OR`/`contains` condition in the no-location path, and as the equivalent SQL predicate inside the single raw query in the location path.
+
+At the time this specification was written, search was filter-only for every sort mode. This remains true for `NEWEST`, `PRICE_ASC`, `PRICE_DESC`, and `NEAREST`. A later ADR-004 amendment introduces `sort=RELEVANCE`, under which search additionally drives ordering — see `docs/specifications/search-ranking-v1-spec.md`.
 
 ---
 

@@ -25,10 +25,10 @@
 
 ## Posts Feed
 
-- [ ] Add cursor pagination to GET /posts.
-- [ ] Sort posts by distance when user location is available.
-- [ ] Add category filter.
-- [ ] Add keyword search.
+- [x] Add cursor pagination to GET /posts.
+- [x] Sort posts by distance when user location is available.
+- [x] Add category filter.
+- [x] Add keyword search.
 - [ ] Add price range filter.
 - [ ] Add response thumbnail optimization.
 
@@ -40,10 +40,11 @@
 
 ## Search
 
-- [ ] Cursor Pagination.
-- [ ] Distance Filter.
-- [ ] Full-text Search.
-- [ ] Category Filter.
+- [x] Cursor Pagination.
+- [x] Distance Filter.
+- [x] Category Filter.
+- [x] Search Ranking (`sort=RELEVANCE`, per `docs/specifications/search-ranking-v1-spec.md`).
+- [x] pg_trgm Search Optimization (finalized `similarity()`-based scoring + GIN trigram indexes; see `docs/specifications/search-ranking-v1-spec.md`, "Finalized Scoring Implementation").
 
 ## Infrastructure
 
