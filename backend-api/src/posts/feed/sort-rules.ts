@@ -13,7 +13,12 @@ interface DistanceSortRule {
   readonly direction: 'asc';
 }
 
-export type SortRule = ColumnSortRule | DistanceSortRule;
+interface RelevanceSortRule {
+  readonly kind: 'relevance';
+  readonly direction: 'desc';
+}
+
+export type SortRule = ColumnSortRule | DistanceSortRule | RelevanceSortRule;
 
 /**
  * Single source of truth for each sort mode's ordering field and tie-break
@@ -39,4 +44,8 @@ export const SORT_RULES: Record<SortOption, SortRule> = {
     direction: 'desc',
   },
   [SortOption.NEAREST]: { kind: 'distance', direction: 'asc' },
+  // Per the Search Ranking V1 Scoring Contract: relevance score descending,
+  // then `id` descending. Requires `search` to be non-empty (enforced by
+  // `FindPostsQueryDto`, not by this table).
+  [SortOption.RELEVANCE]: { kind: 'relevance', direction: 'desc' },
 };

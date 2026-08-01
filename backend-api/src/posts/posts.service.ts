@@ -31,10 +31,11 @@ type MutablePostState = {
 };
 
 type FeedRow = Prisma.PostGetPayload<{ select: typeof postFeedSelect }>;
-// `distance` is attached only on the location-present (PostGIS) path, from
-// `GeoFeedRow.distanceMeters`, and is stripped before the response is
-// returned (the spec forbids exposing it during MVP).
-type FeedItem = FeedRow & { distance?: number };
+// `distance` and `relevance` are attached only by the raw-SQL paths (from
+// `GeoFeedRow.distanceMeters` / `GeoFeedRow.relevanceScore`), used
+// internally to build the next cursor, and stripped before the response is
+// returned (the spec forbids exposing either in the API response).
+type FeedItem = FeedRow & { distance?: number; relevance?: number };
 
 type LocationQuery = FindPostsQueryDto & {
   latitude: number;
@@ -53,9 +54,22 @@ export class PostsService {
   async findAll(query: FindPostsQueryDto) {
     const cursor = decodeCursor(query.cursor, query.sort);
 
-    return this.hasLocationParams(query)
-      ? this.findAllWithDistanceFilter(query, cursor)
-      : this.findAllDbNative(query, cursor);
+    if (this.hasLocationParams(query)) {
+      // Location present: RELEVANCE composes with the radius predicate
+      // exactly like every other sort mode, so it stays on this path too.
+      return this.findAllWithDistanceFilter(query, cursor);
+    }
+
+    if (query.sort === SortOption.RELEVANCE) {
+      // `FindPostsQueryDto` guarantees `search` is a non-empty string
+      // whenever `sort=RELEVANCE`.
+      return this.findAllByRelevance(
+        query as FindPostsQueryDto & { search: string },
+        cursor,
+      );
+    }
+
+    return this.findAllDbNative(query, cursor);
   }
 
   /**
@@ -127,6 +141,35 @@ export class PostsService {
   }
 
   /**
+   * RELEVANCE, no-location path: search is required and non-empty (DTO
+   * validation), and — like the location-present path — the relevance score
+   * cannot be expressed as a Prisma ORDER BY/cursor condition, so this uses
+   * `FeedQueryBuilder.buildRelevanceQuery`'s scoped raw SQL query instead of
+   * `findAllDbNative`. Result rows share `GeoFeedRow`'s shape, so image
+   * hydration and response building are reused unchanged.
+   */
+  private async findAllByRelevance(
+    query: FindPostsQueryDto & { search: string },
+    cursor?: FeedCursor,
+  ) {
+    const sql = this.feedQueryBuilder.buildRelevanceQuery(
+      {
+        search: query.search,
+        categoryId: query.categoryId,
+        limit: query.limit,
+      },
+      cursor,
+    );
+    const rows = await this.prisma.$queryRaw<GeoFeedRow[]>(sql);
+
+    const hasNextPage = rows.length > query.limit;
+    const pageRows = hasNextPage ? rows.slice(0, query.limit) : rows;
+    const items = await this.hydrateImages(pageRows);
+
+    return this.buildResponse(items, query.sort, hasNextPage);
+  }
+
+  /**
    * Reshapes the flat `GeoFeedRow`s from the raw SQL query into the same
    * `FeedItem` shape (`postFeedSelect` + `distance`) the no-location Prisma
    * path produces, and attaches `images` via one additional query keyed by
@@ -170,6 +213,7 @@ export class PostsService {
       category: { id: row.categoryId, name: row.categoryName },
       images: imagesByPostId.get(row.id) ?? [],
       distance: row.distanceMeters,
+      relevance: row.relevanceScore ?? undefined,
     }));
   }
 
@@ -185,17 +229,19 @@ export class PostsService {
         : null;
 
     return {
-      items: items.map((item) => this.omitDistance(item)),
+      items: items.map((item) => this.stripInternalFields(item)),
       nextCursor,
       hasNextPage,
     };
   }
 
-  // The spec forbids exposing the computed distance in the MVP response,
-  // even though it's needed internally for filtering, sorting, and cursors.
-  private omitDistance(item: FeedItem): FeedRow {
+  // ADR-004 (distance) and the Search Ranking V1 spec (relevance score)
+  // both forbid exposing their computed sort keys in the API response, even
+  // though each is needed internally for ordering and cursor continuation.
+  private stripInternalFields(item: FeedItem): FeedRow {
     const post = { ...item };
     delete post.distance;
+    delete post.relevance;
     return post;
   }
 
@@ -215,6 +261,12 @@ export class PostsService {
         return {
           sort: SortOption.NEAREST,
           sortValue: item.distance ?? 0,
+          id: item.id,
+        };
+      case SortOption.RELEVANCE:
+        return {
+          sort: SortOption.RELEVANCE,
+          sortValue: item.relevance ?? 0,
           id: item.id,
         };
     }

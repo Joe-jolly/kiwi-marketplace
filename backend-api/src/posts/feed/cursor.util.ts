@@ -21,12 +21,19 @@ interface NearestCursorFields {
   id: string;
 }
 
+interface RelevanceCursorFields {
+  sort: SortOption.RELEVANCE;
+  sortValue: number; // relevance score
+  id: string;
+}
+
 // Discriminated on `sort`, so `sortValue`'s type is guaranteed to match
 // whichever field the active sorting mode paginates on.
 export type CursorFields =
   | NewestCursorFields
   | PriceCursorFields
-  | NearestCursorFields;
+  | NearestCursorFields
+  | RelevanceCursorFields;
 
 export type FeedCursor = CursorFields & { v: typeof CURSOR_VERSION };
 
@@ -87,6 +94,7 @@ function isValidCursorPayload(
     case SortOption.PRICE_ASC:
     case SortOption.PRICE_DESC:
     case SortOption.NEAREST:
+    case SortOption.RELEVANCE:
       return (
         typeof payload.sortValue === 'number' &&
         Number.isFinite(payload.sortValue)

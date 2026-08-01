@@ -23,10 +23,19 @@ function isLocationRequired(query: FindPostsQueryDto): boolean {
   );
 }
 
+// `search` stays optional for every sort mode except RELEVANCE. Mirroring
+// `isLocationRequired`'s pattern for NEAREST: validation is gated so a
+// missing `search` still fails whenever RELEVANCE is requested, while
+// `search` remains untouched (still fully optional) for every other sort.
+function isSearchValidationActive(query: FindPostsQueryDto): boolean {
+  return query.sort === SortOption.RELEVANCE || query.search !== undefined;
+}
+
 export class FindPostsQueryDto {
+  @ValidateIf(isSearchValidationActive)
+  @IsDefined({ message: 'search is required when sort=RELEVANCE' })
   @IsString()
   @IsNotEmpty()
-  @IsOptional()
   @Transform(({ value }: TransformFnParams): unknown =>
     typeof value === 'string' ? value.trim() : (value as unknown),
   )

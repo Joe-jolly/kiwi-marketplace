@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PostStatus, Prisma } from '@prisma/client';
 import { CursorFields } from './cursor.util';
+import { buildRelevanceScoreExpression } from './relevance-score.sql';
 import { SortOption } from './sort-option.enum';
 import { SORT_RULES } from './sort-rules';
 
@@ -9,6 +10,9 @@ import { SORT_RULES } from './sort-rules';
  * `FindPostsQueryDto` — this builder only needs these fields, and staying
  * decoupled keeps it independently testable ahead of Step 7, where
  * `PostsService` will supply this shape from the real request DTO.
+ *
+ * `search` must be non-empty whenever `sort` is `RELEVANCE` — this is
+ * enforced by `FindPostsQueryDto`, not by this interface or this builder.
  */
 export interface GeoFeedQueryInput {
   latitude: number;
@@ -37,6 +41,10 @@ export interface GeoFeedRow {
   status: PostStatus;
   createdAt: Date;
   distanceMeters: number;
+  // Non-null only when `sort=RELEVANCE` — see `relevance-score.sql.ts`. Null
+  // for every other sort mode, mirroring how `distanceMeters` is always
+  // computed here regardless of whether NEAREST was requested.
+  relevanceScore: number | null;
   ownerId: string;
   ownerDisplayName: string;
   categoryId: string;
@@ -58,6 +66,13 @@ export class GeoFeedQueryBuilder {
    */
   build(input: GeoFeedQueryInput, cursor?: CursorFields): Prisma.Sql {
     const center = this.buildCenterPoint(input.latitude, input.longitude);
+    // `FindPostsQueryDto` guarantees `search` is non-empty whenever
+    // `sort=RELEVANCE`, so the non-null assertion here reflects a validated
+    // precondition, not an unchecked assumption.
+    const relevanceScore =
+      input.sort === SortOption.RELEVANCE
+        ? buildRelevanceScoreExpression(input.search!)
+        : undefined;
 
     const conditions: Prisma.Sql[] = [
       Prisma.sql`"Post"."status" = ${PostStatus.ACTIVE}::"PostStatus"`,
@@ -77,7 +92,11 @@ export class GeoFeedQueryBuilder {
       )`);
     }
 
-    const cursorCondition = this.buildCursorCondition(cursor, center);
+    const cursorCondition = this.buildCursorCondition(
+      cursor,
+      center,
+      relevanceScore,
+    );
     if (cursorCondition) {
       conditions.push(cursorCondition);
     }
@@ -92,6 +111,7 @@ export class GeoFeedQueryBuilder {
         "Post"."status" AS "status",
         "Post"."createdAt" AS "createdAt",
         ST_Distance("Post"."location", ${center}) AS "distanceMeters",
+        ${relevanceScore ?? Prisma.sql`NULL`} AS "relevanceScore",
         "User"."id" AS "ownerId",
         "User"."displayName" AS "ownerDisplayName",
         "Category"."id" AS "categoryId",
@@ -100,7 +120,7 @@ export class GeoFeedQueryBuilder {
       INNER JOIN "User" ON "User"."id" = "Post"."ownerId"
       INNER JOIN "Category" ON "Category"."id" = "Post"."categoryId"
       WHERE ${Prisma.join(conditions, ' AND ')}
-      ORDER BY ${this.buildOrderBy(input.sort, center)}
+      ORDER BY ${this.buildOrderBy(input.sort, center, relevanceScore)}
       LIMIT ${input.limit + 1}
     `;
   }
@@ -117,12 +137,23 @@ export class GeoFeedQueryBuilder {
    * orders by the KNN distance operator against the same `center` point
    * used everywhere else in the query, rather than a plain column.
    */
-  private buildOrderBy(sort: SortOption, center: Prisma.Sql): Prisma.Sql {
+  private buildOrderBy(
+    sort: SortOption,
+    center: Prisma.Sql,
+    relevanceScore?: Prisma.Sql,
+  ): Prisma.Sql {
     const rule = SORT_RULES[sort];
     const direction = Prisma.raw(rule.direction.toUpperCase());
 
     if (rule.kind === 'distance') {
       return Prisma.sql`"Post"."location" <-> ${center} ${direction}, "Post"."id" ${direction}`;
+    }
+
+    if (rule.kind === 'relevance') {
+      // `relevanceScore` is always defined here: this branch is only
+      // reached when `sort=RELEVANCE`, which is exactly when `build()`
+      // computes it.
+      return Prisma.sql`${relevanceScore!} ${direction}, "Post"."id" ${direction}`;
     }
 
     const column = Prisma.raw(`"Post"."${rule.column}"`);
@@ -144,6 +175,7 @@ export class GeoFeedQueryBuilder {
   private buildCursorCondition(
     cursor: CursorFields | undefined,
     center: Prisma.Sql,
+    relevanceScore?: Prisma.Sql,
   ): Prisma.Sql | undefined {
     if (!cursor) {
       return undefined;
@@ -157,6 +189,18 @@ export class GeoFeedQueryBuilder {
       return Prisma.sql`(
         ${distance} ${op} ${cursor.sortValue}
         OR (${distance} = ${cursor.sortValue} AND "Post"."id" ${op} ${cursor.id})
+      )`;
+    }
+
+    if (rule.kind === 'relevance') {
+      // A `RELEVANCE` cursor can only be decoded when the request's own
+      // `sort` is also `RELEVANCE` (`decodeCursor` rejects any mismatch
+      // before this builder runs), so `relevanceScore` is always defined
+      // here.
+      const score = relevanceScore!;
+      return Prisma.sql`(
+        ${score} ${op} ${cursor.sortValue}
+        OR (${score} = ${cursor.sortValue} AND "Post"."id" ${op} ${cursor.id})
       )`;
     }
 
