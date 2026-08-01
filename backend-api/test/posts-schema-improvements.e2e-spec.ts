@@ -150,6 +150,15 @@ describe('Phase 3 Schema Improvements (e2e)', () => {
     });
   }
 
+  // Deliberately far from any other e2e suite's seeded coordinates (see
+  // `feed-v3-pagination.e2e-spec.ts`'s `CENTER`, ~37.5665/126.978, and
+  // `feed-relevance-ranking.e2e-spec.ts`'s `CENTER`, ~-33.8688/151.2093) —
+  // this suite doesn't test location-based feed behavior, so the exact
+  // coordinates are arbitrary, but they must not coincide with a location
+  // another suite's radius-scoped queries might scan when Jest runs
+  // multiple *.e2e-spec.ts files concurrently against the same database.
+  const ISOLATED_LOCATION = { latitude: 51.5074, longitude: -0.1278 };
+
   function createPostBody(overrides: Record<string, unknown> = {}) {
     return {
       categoryId,
@@ -157,8 +166,8 @@ describe('Phase 3 Schema Improvements (e2e)', () => {
       price: 1000,
       description: 'desc',
       details: {},
-      latitude: 37.5665,
-      longitude: 126.978,
+      latitude: ISOLATED_LOCATION.latitude,
+      longitude: ISOLATED_LOCATION.longitude,
       imageUrls: ['https://example.com/a.jpg'],
       ...overrides,
     };

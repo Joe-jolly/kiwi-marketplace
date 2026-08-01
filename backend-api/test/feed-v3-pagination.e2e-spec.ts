@@ -24,6 +24,19 @@ const E2E_DATABASE_URL =
 const CENTER = { latitude: 37.5665, longitude: 126.978 };
 const RADIUS_METERS = 2000;
 
+// A nonsense token appended to every seeded title, guaranteed not to appear
+// in any other suite's fixtures. Used to scope this suite's *unfiltered*
+// (no categoryId, no search) full-walk assertions to only this suite's own
+// posts — those walks otherwise query every ACTIVE post in the database
+// (no-location) or every ACTIVE post within `RADIUS_METERS` of `CENTER`
+// (location, no category), so without this token they are vulnerable to
+// cross-suite contamination whenever Jest runs multiple `*.e2e-spec.ts`
+// files concurrently against the same real database. Tests that already
+// scope by `categoryId` (a per-run random UUID) don't need this — they're
+// inherently isolated — so the token is only added where no such scoping
+// exists.
+const ISOLATION_TOKEN = 'qzvfeedv3';
+
 type FeedItem = { id: string; title: string; price: number; createdAt: string };
 type FeedResponse = {
   items: FeedItem[];
@@ -54,7 +67,7 @@ describe('Feed Engine V3 pagination (e2e)', () => {
     // Within 2km (approx distances noted in comments)
     {
       key: 'p1',
-      title: 'Alpha bike',
+      title: `Alpha bike ${ISOLATION_TOKEN}`,
       price: 100,
       dLat: 0,
       category: 'A',
@@ -62,7 +75,7 @@ describe('Feed Engine V3 pagination (e2e)', () => {
     }, // ~0m
     {
       key: 'p2',
-      title: 'Beta chair',
+      title: `Beta chair ${ISOLATION_TOKEN}`,
       price: 200,
       dLat: 0.001,
       category: 'A',
@@ -70,7 +83,7 @@ describe('Feed Engine V3 pagination (e2e)', () => {
     }, // ~111m
     {
       key: 'p3',
-      title: 'Gamma bike',
+      title: `Gamma bike ${ISOLATION_TOKEN}`,
       price: 50,
       dLat: 0.002,
       category: 'A',
@@ -78,7 +91,7 @@ describe('Feed Engine V3 pagination (e2e)', () => {
     }, // ~222m
     {
       key: 'p4',
-      title: 'Delta table',
+      title: `Delta table ${ISOLATION_TOKEN}`,
       price: 300,
       dLat: 0.005,
       category: 'A',
@@ -86,7 +99,7 @@ describe('Feed Engine V3 pagination (e2e)', () => {
     }, // ~555m
     {
       key: 'p5',
-      title: 'Epsilon bike',
+      title: `Epsilon bike ${ISOLATION_TOKEN}`,
       price: 150,
       dLat: 0.007,
       category: 'B',
@@ -94,7 +107,7 @@ describe('Feed Engine V3 pagination (e2e)', () => {
     }, // ~777m
     {
       key: 'p6',
-      title: 'Zeta lamp',
+      title: `Zeta lamp ${ISOLATION_TOKEN}`,
       price: 250,
       dLat: 0.009,
       category: 'A',
@@ -102,7 +115,7 @@ describe('Feed Engine V3 pagination (e2e)', () => {
     }, // ~1000m
     {
       key: 'p7',
-      title: 'Eta bike',
+      title: `Eta bike ${ISOLATION_TOKEN}`,
       price: 50,
       dLat: 0.012,
       category: 'A',
@@ -111,7 +124,7 @@ describe('Feed Engine V3 pagination (e2e)', () => {
     // Outside 2km
     {
       key: 'p8',
-      title: 'Outside bike',
+      title: `Outside bike ${ISOLATION_TOKEN}`,
       price: 10,
       dLat: 0.05,
       category: 'A',
@@ -120,7 +133,7 @@ describe('Feed Engine V3 pagination (e2e)', () => {
     // Soft-deleted, within radius — must never appear
     {
       key: 'p9',
-      title: 'Deleted bike',
+      title: `Deleted bike ${ISOLATION_TOKEN}`,
       price: 1,
       dLat: 0.0005,
       category: 'A',
@@ -401,8 +414,15 @@ describe('Feed Engine V3 pagination (e2e)', () => {
     ] as const)(
       'full walk sort=%s — no skip, no duplicate, deterministic order',
       async (sort) => {
-        const expected = await expectedIds({ sort });
-        const { ids, pages } = await walkFeed({ sort, limit: 2 });
+        // No categoryId filter here (spans both category A and B), so the
+        // isolation token scopes this otherwise-unfiltered walk to only
+        // this suite's own fixtures — see `ISOLATION_TOKEN`.
+        const expected = await expectedIds({ sort, search: ISOLATION_TOKEN });
+        const { ids, pages } = await walkFeed({
+          sort,
+          limit: 2,
+          search: ISOLATION_TOKEN,
+        });
 
         assertWalkMatchesExpected(ids, expected, `no-location ${sort}`);
         expect(pages.length).toBeGreaterThan(1);
@@ -430,10 +450,18 @@ describe('Feed Engine V3 pagination (e2e)', () => {
     ] as const)(
       'full walk sort=%s — no skip, no duplicate, deterministic order',
       async (sort) => {
-        const expected = await expectedIds({ sort, location: locationQuery });
+        // No categoryId filter here either — scope by the isolation token
+        // so a stray ACTIVE post from another suite located within
+        // `RADIUS_METERS` of `CENTER` can never be picked up.
+        const expected = await expectedIds({
+          sort,
+          location: locationQuery,
+          search: ISOLATION_TOKEN,
+        });
         const { ids, pages } = await walkFeed({
           sort,
           limit: 2,
+          search: ISOLATION_TOKEN,
           ...locationQuery,
         });
 
@@ -579,9 +607,13 @@ describe('Feed Engine V3 pagination (e2e)', () => {
         longitude: CENTER.longitude,
         radius: RADIUS_METERS,
       };
+      // No categoryId filter here — scope by the isolation token so a
+      // stray ACTIVE post from another suite within radius of `CENTER`
+      // can never inflate this exact-length assertion.
       const expected = await expectedIds({
         sort: SortOption.NEAREST,
         location,
+        search: ISOLATION_TOKEN,
       });
       // p1–p7 within radius; p8 outside; p9 deleted
       expect(expected).toHaveLength(7);
@@ -589,6 +621,7 @@ describe('Feed Engine V3 pagination (e2e)', () => {
       const { ids, pages } = await walkFeed({
         sort: SortOption.NEAREST,
         limit: 2,
+        search: ISOLATION_TOKEN,
         ...location,
       });
 
