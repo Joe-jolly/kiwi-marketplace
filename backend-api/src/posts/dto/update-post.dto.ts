@@ -5,11 +5,11 @@ import {
   IsArray,
   IsDefined,
   IsInt,
+  IsNotEmpty,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
-  IsUrl,
   Max,
   Min,
   ValidateIf,
@@ -56,10 +56,13 @@ export class UpdatePostDto {
   @Max(180)
   longitude?: number;
 
+  // Whole-array replacement when present (Image Storage V1 spec, Ordering
+  // Rules); omitted entirely leaves the post's existing images unchanged.
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(10)
-  @IsUrl({}, { each: true })
+  @ArrayMaxSize(15)
+  @IsString({ each: true })
+  @IsNotEmpty({ each: true })
   @IsOptional()
-  imageUrls?: string[];
+  imageKeys?: string[];
 }

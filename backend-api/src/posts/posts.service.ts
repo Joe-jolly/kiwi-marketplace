@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -7,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { PostStatus, UserRole, type Prisma, type User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { FindPostsQueryDto } from './dto/find-posts-query.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
@@ -49,6 +51,7 @@ export class PostsService {
     private readonly prisma: PrismaService,
     private readonly feedQueryBuilder: FeedQueryBuilder,
     private readonly geoFeedQueryBuilder: GeoFeedQueryBuilder,
+    private readonly storageService: StorageService,
   ) {}
 
   async findAll(query: FindPostsQueryDto) {
@@ -80,7 +83,7 @@ export class PostsService {
   async findMine(user: User) {
     const restoreWindowStart = new Date(Date.now() - RESTORE_WINDOW_MS);
 
-    return this.prisma.post.findMany({
+    const posts = await this.prisma.post.findMany({
       where: {
         ownerId: user.id,
         OR: [
@@ -94,6 +97,8 @@ export class PostsService {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       select: postDetailSelect,
     });
+
+    return posts.map((post) => this.resolveImageUrls(post));
   }
 
   /**
@@ -113,7 +118,8 @@ export class PostsService {
     });
 
     const hasNextPage = rows.length > query.limit;
-    const items = hasNextPage ? rows.slice(0, query.limit) : rows;
+    const pageRows = hasNextPage ? rows.slice(0, query.limit) : rows;
+    const items = pageRows.map((row) => this.resolveImageUrls(row));
 
     return this.buildResponse(items, query.sort, hasNextPage);
   }
@@ -195,7 +201,11 @@ export class PostsService {
     for (const image of images) {
       const postImages = imagesByPostId.get(image.postId) ?? [];
       postImages.push({
-        imageUrl: image.imageUrl,
+        // `image.imageUrl` holds the stored R2 object key (column name and
+        // type are unchanged — ADR-005); resolve it to a public URL here so
+        // this raw-SQL path returns the same directly-usable `imageUrl` the
+        // Prisma-native paths produce via `resolveImageUrls`.
+        imageUrl: this.storageService.getPublicUrl(image.imageUrl),
         displayOrder: image.displayOrder,
       });
       imagesByPostId.set(image.postId, postImages);
@@ -299,13 +309,21 @@ export class PostsService {
       throw new NotFoundException('Post not found');
     }
 
-    return post;
+    return this.resolveImageUrls(post);
   }
 
   async update(id: string, user: User, dto: UpdatePostDto) {
     this.assertLocationUpdateIsAtomic(dto);
 
-    return this.prisma.$transaction(async (tx) => {
+    if (dto.imageKeys !== undefined) {
+      this.assertImageKeysOwnedBy(dto.imageKeys, user.id);
+    }
+
+    // Populated inside the transaction below (empty array if `imageKeys` is
+    // omitted, or if every submitted key was already part of the post).
+    let removedImageKeys: string[] = [];
+
+    const updated = await this.prisma.$transaction(async (tx) => {
       const post = await tx.post.findUnique({
         where: { id },
         select: {
@@ -344,11 +362,20 @@ export class PostsService {
         data.longitude = dto.longitude;
       }
 
-      if (dto.imageUrls !== undefined) {
+      if (dto.imageKeys !== undefined) {
+        const existingImages = await tx.postImage.findMany({
+          where: { postId: post.id },
+          select: { imageUrl: true },
+        });
+        const submittedKeys = new Set(dto.imageKeys);
+        removedImageKeys = existingImages
+          .map((image) => image.imageUrl)
+          .filter((key) => !submittedKeys.has(key));
+
         data.images = {
           deleteMany: {},
-          create: dto.imageUrls.map((imageUrl, displayOrder) => ({
-            imageUrl,
+          create: dto.imageKeys.map((imageKey, displayOrder) => ({
+            imageUrl: imageKey,
             displayOrder,
           })),
         };
@@ -360,6 +387,18 @@ export class PostsService {
         select: postDetailSelect,
       });
     });
+
+    // Storage/Deletion Rule: the `PostImage` row removal above has already
+    // committed by this point — Postgres, not R2, is the source of truth
+    // (Database Constitution). R2 cleanup is intentionally best-effort here:
+    // a failed delete leaves (at worst) an orphaned R2 object, never a
+    // `PostImage` row pointing at storage that no longer exists, which is
+    // the safer of the two possible failure directions.
+    await Promise.allSettled(
+      removedImageKeys.map((key) => this.storageService.delete(key)),
+    );
+
+    return this.resolveImageUrls(updated);
   }
 
   async remove(id: string, user: User) {
@@ -438,6 +477,8 @@ export class PostsService {
   }
 
   async create(user: User, dto: CreatePostDto) {
+    this.assertImageKeysOwnedBy(dto.imageKeys, user.id);
+
     return this.prisma.$transaction(async (tx) => {
       const category = await tx.category.findUnique({
         where: { id: dto.categoryId },
@@ -448,7 +489,7 @@ export class PostsService {
         throw new NotFoundException('Category not found');
       }
 
-      return tx.post.create({
+      const post = await tx.post.create({
         data: {
           ownerId: user.id,
           categoryId: dto.categoryId,
@@ -459,8 +500,8 @@ export class PostsService {
           latitude: dto.latitude,
           longitude: dto.longitude,
           images: {
-            create: dto.imageUrls.map((imageUrl, displayOrder) => ({
-              imageUrl,
+            create: dto.imageKeys.map((imageKey, displayOrder) => ({
+              imageUrl: imageKey,
               displayOrder,
             })),
           },
@@ -469,7 +510,68 @@ export class PostsService {
           images: true,
         },
       });
+
+      return this.resolveImageUrls(post);
     });
+  }
+
+  /**
+   * `POST /posts/images` (Image Storage V1 spec): validates presence,
+   * derives a user-namespaced key server-side — the client never supplies or
+   * influences it (ADR-005, Storage: "Object keys are namespaced by
+   * uploader") — and delegates content validation, WebP compression, and R2
+   * storage to `StorageService`. Does not attach the image to any post;
+   * attachment happens when the returned key is later submitted in
+   * `imageKeys` on a create/update request.
+   */
+  async uploadImage(
+    user: User,
+    file?: Express.Multer.File,
+  ): Promise<{ key: string }> {
+    if (!file) {
+      throw new BadRequestException('No image file provided');
+    }
+
+    const key = `posts/${user.id}/${randomUUID()}.webp`;
+    await this.storageService.upload(file.buffer, key, file.mimetype);
+
+    return { key };
+  }
+
+  /**
+   * Ownership Rules #2/#3: ownership is derived solely from each key's own
+   * `posts/{userId}/` namespace prefix, never from anything the client
+   * separately asserts. A key that is merely well-formed but was never
+   * actually uploaded (or belongs to another user) is rejected identically —
+   * the Error Handling table requires the service to not distinguish "not
+   * mine" from "does not exist".
+   */
+  private assertImageKeysOwnedBy(imageKeys: string[], userId: string): void {
+    const ownedPrefix = `posts/${userId}/`;
+    const hasUnownedKey = imageKeys.some((key) => !key.startsWith(ownedPrefix));
+
+    if (hasUnownedKey) {
+      throw new BadRequestException(
+        'One or more images are not owned by the requesting user',
+      );
+    }
+  }
+
+  /**
+   * Resolves every stored R2 object key in `post.images` to a fully-usable
+   * public URL (Image Storage V1 spec, Response Format), without changing
+   * the `images[].imageUrl` field name clients already receive.
+   */
+  private resolveImageUrls<
+    T extends { images: { imageUrl: string; displayOrder: number }[] },
+  >(post: T): T {
+    return {
+      ...post,
+      images: post.images.map((image) => ({
+        ...image,
+        imageUrl: this.storageService.getPublicUrl(image.imageUrl),
+      })),
+    };
   }
 
   private assertLocationUpdateIsAtomic(dto: UpdatePostDto) {

@@ -7,7 +7,6 @@ import {
   IsNumber,
   IsObject,
   IsString,
-  IsUrl,
   Max,
   Min,
 } from 'class-validator';
@@ -42,9 +41,14 @@ export class CreatePostDto {
   @Max(180)
   longitude: number;
 
+  // Elements are opaque R2 object keys returned by `POST /posts/images`, not
+  // URLs (Image Storage V1 spec, DTO Contract). Ownership of each key is
+  // verified in `PostsService`, since it requires a namespace check DTO-level
+  // validation cannot perform.
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(10)
-  @IsUrl({}, { each: true })
-  imageUrls: string[];
+  @ArrayMaxSize(15)
+  @IsString({ each: true })
+  @IsNotEmpty({ each: true })
+  imageKeys: string[];
 }
