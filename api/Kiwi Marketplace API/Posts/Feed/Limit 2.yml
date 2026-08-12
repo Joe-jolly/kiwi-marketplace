@@ -1,0 +1,22 @@
+info:
+  name: Limit 2
+  type: http
+  seq: 6
+
+http:
+  method: GET
+  url: http://localhost:3000/posts?limit=3&cursor=eyJ2IjoxLCJjcmVhdGVkQXQiOiIyMDI2LTA3LTE4VDAxOjI5OjIyLjE3NloiLCJpZCI6ImViNWI5NzZmLWZjMWMtNDZhMi1hNDU4LWNkMDc4YjA2MjNiNyJ9
+  params:
+    - name: limit
+      value: "3"
+      type: query
+    - name: cursor
+      value: eyJ2IjoxLCJjcmVhdGVkQXQiOiIyMDI2LTA3LTE4VDAxOjI5OjIyLjE3NloiLCJpZCI6ImViNWI5NzZmLWZjMWMtNDZhMi1hNDU4LWNkMDc4YjA2MjNiNyJ9
+      type: query
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

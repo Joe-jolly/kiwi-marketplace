@@ -1,0 +1,19 @@
+info:
+  name: Test
+  type: http
+  seq: 7
+
+http:
+  method: GET
+  url: http://localhost:3000/posts?cursor=abc
+  params:
+    - name: cursor
+      value: abc
+      type: query
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

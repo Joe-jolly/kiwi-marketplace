@@ -1,0 +1,18 @@
+info:
+  name: Delete
+  type: http
+  seq: 4
+
+http:
+  method: DELETE
+  url: http://localhost:3000/posts/1f93e54e-5620-4815-8fe7-4132739053d4
+  headers:
+    - name: Authorization
+      value: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5MTZlMmI5Ny00N2E1LTQyNTktOWMwZC05NzY2MzQ0MWM2MmEiLCJwaG9uZSI6IjAxMDEyMzQ1Njc4IiwiaWF0IjoxNzg0MjExMjEzLCJleHAiOjE3ODQ4MTYwMTN9.7sceqE3lGBPMs2fs4utx6mEtXVdc8TIgE5VViXIF-mM
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
