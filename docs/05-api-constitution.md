@@ -332,7 +332,11 @@ Favorite Post
 
 Unfavorite Post
 
+Upload Post Image
+
 Posts are the primary business entity.
+
+Upload Post Image requires authentication. The uploaded file is validated and compressed server-side before being stored in Cloudflare R2, per the Technical Constitution's File Upload Constitution and ADR-005 (Image Storage Architecture).
 
 ---
 
