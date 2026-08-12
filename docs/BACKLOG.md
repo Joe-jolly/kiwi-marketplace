@@ -18,7 +18,7 @@
 
 ## Posts
 
-- [ ] Replace image URLs with Cloudflare R2 upload flow.
+- [x] Replace image URLs with Cloudflare R2 upload flow (`imageKeys` contract, server-side upload/compression/ownership/diff-and-delete; see `docs/specifications/image-storage-v1-spec.md` and `docs/adr/ADR-005-image-storage-architecture.md`).
 - [ ] Validate `details` against `Category.schema` before creating a post.
 - [ ] Add ownership check before Update/Delete endpoints.
 - [x] Implement soft delete.

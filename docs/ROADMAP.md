@@ -113,10 +113,10 @@
 
 ## Phase 7 - Image Storage
 
-- [ ] Cloudflare R2 Integration
-- [ ] Upload API
-- [ ] Delete Image
-- [ ] Image Validation
+- [x] Cloudflare R2 Integration
+- [x] Upload API
+- [x] Delete Image
+- [x] Image Validation
 
 ---
 
