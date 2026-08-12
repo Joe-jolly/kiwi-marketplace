@@ -1,0 +1,25 @@
+info:
+  name: Upload Image
+  type: http
+  seq: 5
+
+http:
+  method: POST
+  url: http://localhost:3000/posts/images
+  headers:
+    - name: Authorization
+      value: Bearer <your-jwt-token>
+  body:
+    type: multipart-form
+    data:
+      - name: image
+        type: file
+        value: /absolute/path/to/your/image.jpg
+        contentType: image/jpeg
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

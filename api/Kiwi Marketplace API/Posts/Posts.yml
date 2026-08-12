@@ -1,0 +1,37 @@
+info:
+  name: Posts
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: http://localhost:3000/posts
+  headers:
+    - name: Authorization
+      value: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5MTZlMmI5Ny00N2E1LTQyNTktOWMwZC05NzY2MzQ0MWM2MmEiLCJwaG9uZSI6IjAxMDEyMzQ1Njc4IiwiaWF0IjoxNzg0MDQyMzcyLCJleHAiOjE3ODQ2NDcxNzJ9.azXzkDfwrG-3lPFTVoLiDccAnF1cN-tpJ9jySlXPA3A
+  body:
+    type: json
+    data: |-
+      {
+        "categoryId": "2079e8d2-02b7-4016-9eb0-ace4f0ca3aac",
+        "title": "iPhone 14 Pro",
+        "price": 1250000,
+        "description": "Excellent condition",
+        "details": {
+          "brand": "Apple",
+          "model": "iPhone 14 Pro"
+        },
+        "latitude": 36.3504,
+        "longitude": 127.3845,
+        "imageKeys": [
+          "posts/<your-user-id>/<key-returned-by-POST-posts-images-1>.webp",
+          "posts/<your-user-id>/<key-returned-by-POST-posts-images-2>.webp"
+        ]
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
