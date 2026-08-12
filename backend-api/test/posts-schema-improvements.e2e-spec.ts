@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PostStatus, UserRole } from '@prisma/client';
@@ -168,7 +169,12 @@ describe('Phase 3 Schema Improvements (e2e)', () => {
       details: {},
       latitude: ISOLATED_LOCATION.latitude,
       longitude: ISOLATED_LOCATION.longitude,
-      imageUrls: ['https://example.com/a.jpg'],
+      // A syntactically valid, correctly-namespaced key (Image Storage V1
+      // spec) — this suite never uploads a real image or asserts on
+      // `imageUrl` content, so a never-uploaded key is sufficient; ownership
+      // verification is a pure `posts/{ownerId}/` prefix check with no R2
+      // existence lookup.
+      imageKeys: [`posts/${ownerId}/${randomUUID()}.webp`],
       ...overrides,
     };
   }
