@@ -506,9 +506,7 @@ export class PostsService {
             })),
           },
         },
-        include: {
-          images: true,
-        },
+        select: postDetailSelect,
       });
 
       return this.resolveImageUrls(post);
