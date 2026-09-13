@@ -201,7 +201,7 @@ To prevent scope creep during implementation:
 
 - No change to the maximum radius, default limit, or any other currently-validated bound.
 - No new sort mode, filter, or query parameter.
-- No inclusion of `RESERVED` posts in the feed (tracked separately in `ROADMAP.md` Phase 15, explicitly out of scope here).
+- No inclusion of `RESERVED` posts in the feed (tracked separately in `ROADMAP.md` Phase 16, explicitly out of scope here).
 - No schema change beyond the `location` column and its GiST index.
 - No change to any module other than the feed query pipeline.
 

@@ -70,3 +70,11 @@
 - [x] Add `deletedAt DateTime?` to `Post` to record deletion time and support future restore, retention policies, and automated cleanup jobs.
 - [x] Owner restore within 30 days (`POST /posts/:id/restorations`).
 - [x] Owner listing of restorable deleted posts (`GET /posts/me`).
+
+## Technical Hardening (Phase 8)
+
+- [x] Fix `PostsService.create()` response shape: was using `tx.post.create({ include: { images: true } })`, which diverged from the frozen `docs/specifications/image-storage-v1-spec.md` contract (`create()`/`update()` both return `postDetailSelect`) — missing nested `owner`/`category` objects, over-exposed raw `PostImage` rows. Now uses `select: postDetailSelect`, matching `update()`.
+- [x] Fix TypeScript `RELEVANCE` exhaustiveness gap in `test/feed-v3-pagination.e2e-spec.ts`'s local sort comparator — missing `case SortOption.RELEVANCE` produced a `number | undefined` return type, caught only by a project-wide `tsc --noEmit` (not by `nest build`, which excludes `test/`).
+- [x] Correct local `.env` `DATABASE_URL` — was pointing at a stale, unmigrated local Postgres install (port 5432) instead of the Docker PostGIS dev container (port 5433). Root cause of recurring, previously-misdiagnosed "transient" `Post.deletedAt does not exist` e2e failures across earlier phases.
+- [x] Repository hygiene: removed untracked `POC_CLEANUP_REPORT.md` (one-time, completed PoC teardown report with no ongoing reference value) and `docs/AI_AGENT_GUIDE.md` (redundant with the always-applied `.cursor/rules/backend.mdc`).
+- [ ] `npm audit`: 7 high-severity findings in `backend-api` (`brace-expansion`, `fast-uri`, `js-yaml` — dev-only, `eslint`/`jest` transitive deps; `deepmerge-ts`/`effect` — reachable only through `prisma`'s optional peer-dependency chain via `@prisma/config`, not invoked by any runtime code path). Confirmed non-runtime-exploitable during the Phase 8 audit. **Deferred** — no fix available without a breaking Prisma change (`npm audit fix --force` offers `prisma@6.12.0`, a downgrade from the current `6.16.3`). Revisit alongside "Upgrade Prisma from v6 to v7 after MVP is completed" above.

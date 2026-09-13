@@ -120,7 +120,19 @@
 
 ---
 
-## Phase 8 - Favorites
+## Phase 8 - Technical Hardening
+
+- [x] API-Contract Consistency Audit
+- [x] Fix `create()` Response Shape (aligned with `postDetailSelect`)
+- [x] TypeScript Compiler Audit
+- [x] Fix RELEVANCE Exhaustiveness Gap (test-only sort comparator)
+- [x] Local Environment Configuration Fix (`.env` `DATABASE_URL`)
+- [x] Repository Hygiene Cleanup
+- [ ] npm audit Dependency Findings (deferred — see `docs/BACKLOG.md`)
+
+---
+
+## Phase 9 - Favorites
 
 - [ ] Favorite Post
 - [ ] Remove Favorite
@@ -128,7 +140,7 @@
 
 ---
 
-## Phase 9 - Chat
+## Phase 10 - Chat
 
 - [ ] Chat Creation
 - [ ] Messages
@@ -138,7 +150,7 @@
 
 ---
 
-## Phase 10 - Notifications
+## Phase 11 - Notifications
 
 - [ ] Notification Entity
 - [ ] Notification API
@@ -146,7 +158,7 @@
 
 ---
 
-## Phase 11 - Admin Panel
+## Phase 12 - Admin Panel
 
 - [ ] React Admin Setup
 - [ ] Admin Authentication
@@ -157,7 +169,7 @@
 
 ---
 
-## Phase 12 - Mobile App
+## Phase 13 - Mobile App
 
 - [ ] React Native Setup
 - [ ] Authentication
@@ -170,7 +182,7 @@
 
 ---
 
-## Phase 13 - Production
+## Phase 14 - Production
 
 - [ ] Environment Configuration
 - [ ] Docker Production
@@ -184,14 +196,14 @@
 
 ---
 
-## Phase 14 - Release
+## Phase 15 - Release
 
 - [ ] Build Android APK
 - [ ] Google Play Store
 
 ---
 
-## Phase 15 - Feed Improvements
+## Phase 16 - Feed Improvements
 
 - [ ] Include RESERVED Posts in Feed
 - [ ] Display Reserved Badge

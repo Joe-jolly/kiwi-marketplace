@@ -129,7 +129,7 @@ These rules govern image storage and hold regardless of implementation detail:
 ### Trade-offs
 
 - Image bytes transit the API server, consuming its bandwidth and CPU (for compression) rather than a direct client-to-R2 path. Accepted per the Performance Constitution ("measure before optimizing") until a real bottleneck is measured.
-- Replacing `imageUrls: string[]` with an object-key array is a breaking change to the `POST /posts` / `PATCH /posts/:id` request shape. Accepted as pre-launch API evolution: no versioned base path (`/api/v1`) exists anywhere in the codebase yet, and no client (the mobile app, per `ROADMAP.md` Phase 12, has not started) currently consumes the old contract in production. The existing Postman collection (`api/Kiwi Marketplace API/Posts/`) is the only current consumer of the old shape and must be updated alongside the implementation.
+- Replacing `imageUrls: string[]` with an object-key array is a breaking change to the `POST /posts` / `PATCH /posts/:id` request shape. Accepted as pre-launch API evolution: no versioned base path (`/api/v1`) exists anywhere in the codebase yet, and no client (the mobile app, per `ROADMAP.md` Phase 13, has not started) currently consumes the old contract in production. The existing Postman collection (`api/Kiwi Marketplace API/Posts/`) is the only current consumer of the old shape and must be updated alongside the implementation.
 - `PostImage`'s pre-existing deviation from the Technical Constitution's universal table-shape rule (no standalone `id`, no `updatedAt`) is knowingly left unresolved by this decision (see Design Decisions).
 
 ---
