@@ -384,6 +384,15 @@ describe('Feed Engine V3 pagination (e2e)', () => {
           if (da !== db) return da - db;
           return compareId(a.id, b.id, 'asc');
         }
+        case SortOption.RELEVANCE:
+          // This helper's query never computes a relevance score — RELEVANCE
+          // ordering is independently verified by
+          // `feed-relevance-ranking.e2e-spec.ts` instead. No test in this
+          // file calls `expectedIds` with sort=RELEVANCE; this case exists
+          // only so the switch is exhaustive over `SortOption`.
+          throw new Error(
+            'expectedIds() does not support sort=RELEVANCE; see feed-relevance-ranking.e2e-spec.ts',
+          );
       }
     });
 
