@@ -5,6 +5,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { PostsModule } from './posts/posts.module';
+import { FavoritesModule } from './favorites/favorites.module';
 import { StorageModule } from './storage/storage.module';
 
 // `StorageModule` is `@Global()` (like `PrismaModule`), but Nest still
@@ -12,7 +13,14 @@ import { StorageModule } from './storage/storage.module';
 // providers to be instantiated at all — `PostsService` now depends on
 // `StorageService` (Image Storage V1 spec / ADR-005).
 @Module({
-  imports: [PrismaModule, StorageModule, UsersModule, AuthModule, PostsModule],
+  imports: [
+    PrismaModule,
+    StorageModule,
+    UsersModule,
+    AuthModule,
+    PostsModule,
+    FavoritesModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })
