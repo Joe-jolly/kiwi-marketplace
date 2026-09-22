@@ -101,34 +101,28 @@ Verbs are prohibited in endpoint names.
 
 Every API response must follow a consistent structure.
 
-Success Response:
+**Amendment (Phase 8/9 hardening, current authoritative contract):** every endpoint shipped so far (Auth, Users, Posts) returns the resource or result directly, with no `{success, data}` envelope, and this document previously described an envelope that was never actually implemented anywhere in the codebase. Rather than retrofit a global response-wrapping interceptor onto every already-shipped, already-tested endpoint for no functional benefit (no consumer — the mobile app has not started per `ROADMAP.md`), this section is amended to document the contract Kiwi has consistently implemented since Phase 1, which is now the binding rule for all new and existing endpoints:
 
-{
-"success": true,
-"data": {}
-}
+Success Response (single resource or mutation result):
 
-List Response:
+{ ...resource fields directly, no wrapper... }
 
-{
-"success": true,
-"data": [],
-"pagination": {}
-}
-
-Error Response:
-
-{
-"success": false,
-"message": "Human readable error message"
-}
-
-Cursor-paginated list endpoints (for example, the feed) use the following response contract instead of the generic List Response shape above, consistent with the cursor pagination model defined in ADR-004:
+Cursor-paginated list endpoints (for example, the feed, `GET /posts/me`, and `GET /favorites`) use the following response contract, consistent with the cursor pagination model defined in ADR-004:
 
 {
 "items": [],
 "nextCursor": "string | null",
 "hasNextPage": true
+}
+
+Kiwi has no non-cursor-paginated list endpoint in current use; if one is introduced, it must still not return unbounded lists (API Constitution §9) and should default to the cursor shape above rather than inventing a `{success, data, pagination}` shape that has no precedent in the codebase.
+
+Error Response (NestJS's standard exception-filter output — no custom exception filter is implemented):
+
+{
+"statusCode": 400,
+"message": "Human readable error message, or an array of messages for validation failures",
+"error": "Bad Request"
 }
 
 Consistency is mandatory.
@@ -332,9 +326,13 @@ Favorite Post
 
 Unfavorite Post
 
+Get Favorites
+
 Upload Post Image
 
 Posts are the primary business entity.
+
+Favorite Post and Unfavorite Post are implemented as `POST /posts/:id/favorites` and `DELETE /posts/:id/favorites` — idempotent (§24). Get Favorites ("My Favorites") is `GET /favorites`, a separate, top-level, cursor-paginated (§9) list endpoint, since it is not scoped to a single post.
 
 Upload Post Image requires authentication. The uploaded file is validated and compressed server-side before being stored in Cloudflare R2, per the Technical Constitution's File Upload Constitution and ADR-005 (Image Storage Architecture).
 

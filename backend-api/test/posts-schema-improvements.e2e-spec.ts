@@ -369,12 +369,68 @@ describe('Phase 3 Schema Improvements (e2e)', () => {
       const mine = await request(app.getHttpServer())
         .get('/posts/me')
         .set('Authorization', `Bearer ${ownerToken}`)
+        .query({ limit: 50 })
         .expect(200);
 
-      const ids = (mine.body as { id: string }[]).map((p) => p.id);
+      const { items } = mine.body as { items: { id: string }[] };
+      const ids = items.map((p) => p.id);
       expect(ids).toContain(active.id);
       expect(ids).toContain(restorable.id);
       expect(ids).not.toContain(expired.id);
+    });
+
+    it('GET /posts/me is cursor-paginated (createdAt desc, id desc)', async () => {
+      // Earlier tests in this file/describe block already created other
+      // ACTIVE posts owned by `ownerId`, so this owner has more history
+      // than just these 3 — the assertions below only rely on relative
+      // ordering between `first`/`second`/`third`, not on these being the
+      // owner's only posts.
+      const first = await createOwnedPost();
+      const second = await createOwnedPost();
+      const third = await createOwnedPost();
+
+      const page1 = await request(app.getHttpServer())
+        .get('/posts/me')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .query({ limit: 2 })
+        .expect(200);
+
+      const body1 = page1.body as {
+        items: { id: string }[];
+        nextCursor: string | null;
+        hasNextPage: boolean;
+      };
+      expect(body1.items).toHaveLength(2);
+      expect(body1.items.map((p) => p.id)).toEqual([third.id, second.id]);
+      expect(body1.hasNextPage).toBe(true);
+      expect(body1.nextCursor).not.toBeNull();
+
+      const page2 = await request(app.getHttpServer())
+        .get('/posts/me')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .query({ limit: 2, cursor: body1.nextCursor })
+        .expect(200);
+
+      const body2 = page2.body as {
+        items: { id: string }[];
+        nextCursor: string | null;
+        hasNextPage: boolean;
+      };
+      // `first` must be the immediate next post after `second` — no other
+      // post can have been created strictly between them in time — but
+      // earlier tests' posts are still older still, so pagination continues
+      // beyond this page rather than terminating here.
+      expect(body2.items[0]?.id).toBe(first.id);
+      expect(body2.hasNextPage).toBe(true);
+      expect(body2.nextCursor).not.toBeNull();
+    });
+
+    it('rejects an invalid /posts/me cursor', async () => {
+      await request(app.getHttpServer())
+        .get('/posts/me')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .query({ cursor: 'not-a-valid-cursor' })
+        .expect(400);
     });
 
     it('non-owner cannot restore', async () => {
@@ -414,6 +470,63 @@ describe('Phase 3 Schema Improvements (e2e)', () => {
       expect(body.status).toBe(PostStatus.DELETED);
       expect(body.deletedAt).not.toBeNull();
       expect(body.owner.id).toBe(ownerId);
+    });
+  });
+
+  describe('GET /posts/:id status visibility', () => {
+    // No reservation/completion feature exists yet to reach these statuses
+    // through the API, so they're set directly via Prisma — this suite
+    // tests only `findOne()`'s visibility rule, not how a post would
+    // actually transition to RESERVED/COMPLETED.
+    it('RESERVED posts remain visible to public callers', async () => {
+      const post = await createOwnedPost();
+      await prisma.post.update({
+        where: { id: post.id },
+        data: { status: PostStatus.RESERVED },
+      });
+
+      const response = await request(app.getHttpServer())
+        .get(`/posts/${post.id}`)
+        .expect(200);
+
+      expect((response.body as { status: PostStatus }).status).toBe(
+        PostStatus.RESERVED,
+      );
+    });
+
+    it('COMPLETED posts remain visible to public callers', async () => {
+      const post = await createOwnedPost();
+      await prisma.post.update({
+        where: { id: post.id },
+        data: { status: PostStatus.COMPLETED },
+      });
+
+      const response = await request(app.getHttpServer())
+        .get(`/posts/${post.id}`)
+        .expect(200);
+
+      expect((response.body as { status: PostStatus }).status).toBe(
+        PostStatus.COMPLETED,
+      );
+    });
+
+    it('PAUSED posts are hidden from public callers but visible to ADMIN', async () => {
+      const post = await createOwnedPost();
+      await prisma.post.update({
+        where: { id: post.id },
+        data: { status: PostStatus.PAUSED },
+      });
+
+      await request(app.getHttpServer()).get(`/posts/${post.id}`).expect(404);
+
+      const adminView = await request(app.getHttpServer())
+        .get(`/posts/${post.id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect((adminView.body as { status: PostStatus }).status).toBe(
+        PostStatus.PAUSED,
+      );
     });
   });
 });

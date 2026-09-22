@@ -19,6 +19,7 @@ import type { User } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt.auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt.auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CursorPaginationQueryDto } from '../common/dto/cursor-pagination-query.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import { FindPostsQueryDto } from './dto/find-posts-query.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
@@ -43,8 +44,11 @@ export class PostsController {
   // Registered before `:id` so "me" is not captured as a post id.
   @Get('me')
   @UseGuards(JwtAuthGuard)
-  findMine(@CurrentUser() user: User) {
-    return this.postsService.findMine(user);
+  findMine(
+    @CurrentUser() user: User,
+    @Query() query: CursorPaginationQueryDto,
+  ) {
+    return this.postsService.findMine(user, query);
   }
 
   @Get(':id')

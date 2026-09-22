@@ -7,6 +7,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PostStatus, UserRole, type Prisma, type User } from '@prisma/client';
+import { CursorPaginationQueryDto } from '../common/dto/cursor-pagination-query.dto';
+import {
+  decodeKeysetCursor,
+  encodeKeysetCursor,
+} from '../common/pagination/keyset-cursor.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { CreatePostDto } from './dto/create-post.dto';
@@ -21,7 +26,13 @@ import {
 import { FeedQueryBuilder } from './feed/feed-query.builder';
 import { GeoFeedQueryBuilder, GeoFeedRow } from './feed/geo-feed-query.builder';
 import { SortOption } from './feed/sort-option.enum';
+import { isPostHiddenFromPublic } from './post-visibility.util';
 import { postDetailSelect, postFeedSelect } from './post.select';
+import { resolveImageUrls } from './resolve-image-urls.util';
+
+/** Scopes `GET /posts/me`'s cursor so it can't be replayed against another
+ * single-sort-mode cursor endpoint (currently `GET /favorites`). */
+const MINE_CURSOR_PURPOSE = 'posts-mine';
 
 /** Owner restore window for soft-deleted posts (product rule). */
 const RESTORE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
@@ -79,26 +90,61 @@ export class PostsService {
    * Owner's posts: every non-DELETED status, plus DELETED posts still inside
    * the 30-day restore window. Older soft-deleted posts are hidden from the
    * owner UI but remain in the database.
+   *
+   * Cursor-paginated (`createdAt desc, id desc`), like every other list
+   * endpoint — API Constitution §9 ("large lists must never return all
+   * records") applies here exactly as it does to the feed; this was
+   * previously an unpaginated array, corrected as part of the Phase 8/9
+   * hardening pass.
    */
-  async findMine(user: User) {
+  async findMine(user: User, query: CursorPaginationQueryDto) {
     const restoreWindowStart = new Date(Date.now() - RESTORE_WINDOW_MS);
+    const cursor = decodeKeysetCursor(MINE_CURSOR_PURPOSE, query.cursor);
 
-    const posts = await this.prisma.post.findMany({
-      where: {
-        ownerId: user.id,
-        OR: [
-          { status: { not: PostStatus.DELETED } },
-          {
-            status: PostStatus.DELETED,
-            deletedAt: { gte: restoreWindowStart },
-          },
-        ],
-      },
+    const baseWhere: Prisma.PostWhereInput = {
+      ownerId: user.id,
+      OR: [
+        { status: { not: PostStatus.DELETED } },
+        {
+          status: PostStatus.DELETED,
+          deletedAt: { gte: restoreWindowStart },
+        },
+      ],
+    };
+
+    const cursorWhere: Prisma.PostWhereInput | undefined = cursor
+      ? {
+          OR: [
+            { createdAt: { lt: cursor.sortValue } },
+            { createdAt: cursor.sortValue, id: { lt: cursor.id } },
+          ],
+        }
+      : undefined;
+
+    const rows = await this.prisma.post.findMany({
+      where: cursorWhere ? { AND: [baseWhere, cursorWhere] } : baseWhere,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: query.limit + 1,
       select: postDetailSelect,
     });
 
-    return posts.map((post) => this.resolveImageUrls(post));
+    const hasNextPage = rows.length > query.limit;
+    const pageRows = hasNextPage ? rows.slice(0, query.limit) : rows;
+    const items = pageRows.map((post) =>
+      resolveImageUrls(this.storageService, post),
+    );
+
+    const lastItem = items.at(-1);
+    const nextCursor =
+      hasNextPage && lastItem
+        ? encodeKeysetCursor(
+            MINE_CURSOR_PURPOSE,
+            lastItem.createdAt,
+            lastItem.id,
+          )
+        : null;
+
+    return { items, nextCursor, hasNextPage };
   }
 
   /**
@@ -119,7 +165,9 @@ export class PostsService {
 
     const hasNextPage = rows.length > query.limit;
     const pageRows = hasNextPage ? rows.slice(0, query.limit) : rows;
-    const items = pageRows.map((row) => this.resolveImageUrls(row));
+    const items = pageRows.map((row) =>
+      resolveImageUrls(this.storageService, row),
+    );
 
     return this.buildResponse(items, query.sort, hasNextPage);
   }
@@ -291,8 +339,22 @@ export class PostsService {
   }
 
   /**
-   * Public callers only see ACTIVE posts. ADMIN callers may also read
-   * soft-deleted (and other non-ACTIVE) posts for moderation/audit.
+   * Visibility follows the Database Constitution's Post Status Constitution
+   * per-status definitions, not a blanket "ACTIVE only" rule: ACTIVE,
+   * RESERVED ("remains visible"), and COMPLETED ("read-only", implicitly
+   * still visible) are all visible to every caller, including anonymous
+   * ones. Only PAUSED ("temporarily hidden") and DELETED ("soft deleted")
+   * are hidden from the public. ADMIN callers may read any status,
+   * regardless, for moderation/audit — matching the existing restore-flow
+   * precedent of admins being able to `GET` a soft-deleted post.
+   *
+   * This was previously a blanket `status !== ACTIVE` check, which
+   * incorrectly hid RESERVED and COMPLETED posts too; corrected as part of
+   * the Phase 8/9 hardening pass. The feed's own `status: ACTIVE` filter
+   * (`FeedQueryBuilder`/`GeoFeedQueryBuilder`, frozen by ADR-004) is a
+   * separate, unrelated decision about feed *composition* and is
+   * intentionally not changed by this fix — this method governs only the
+   * single-post detail view.
    */
   async findOne(id: string, viewer?: User) {
     const post = await this.prisma.post.findUnique({
@@ -305,11 +367,11 @@ export class PostsService {
     }
 
     const isAdmin = viewer?.role === UserRole.ADMIN;
-    if (post.status !== PostStatus.ACTIVE && !isAdmin) {
+    if (isPostHiddenFromPublic(post.status) && !isAdmin) {
       throw new NotFoundException('Post not found');
     }
 
-    return this.resolveImageUrls(post);
+    return resolveImageUrls(this.storageService, post);
   }
 
   async update(id: string, user: User, dto: UpdatePostDto) {
@@ -398,7 +460,7 @@ export class PostsService {
       removedImageKeys.map((key) => this.storageService.delete(key)),
     );
 
-    return this.resolveImageUrls(updated);
+    return resolveImageUrls(this.storageService, updated);
   }
 
   async remove(id: string, user: User) {
@@ -509,7 +571,7 @@ export class PostsService {
         select: postDetailSelect,
       });
 
-      return this.resolveImageUrls(post);
+      return resolveImageUrls(this.storageService, post);
     });
   }
 
@@ -553,23 +615,6 @@ export class PostsService {
         'One or more images are not owned by the requesting user',
       );
     }
-  }
-
-  /**
-   * Resolves every stored R2 object key in `post.images` to a fully-usable
-   * public URL (Image Storage V1 spec, Response Format), without changing
-   * the `images[].imageUrl` field name clients already receive.
-   */
-  private resolveImageUrls<
-    T extends { images: { imageUrl: string; displayOrder: number }[] },
-  >(post: T): T {
-    return {
-      ...post,
-      images: post.images.map((image) => ({
-        ...image,
-        imageUrl: this.storageService.getPublicUrl(image.imageUrl),
-      })),
-    };
   }
 
   private assertLocationUpdateIsAtomic(dto: UpdatePostDto) {

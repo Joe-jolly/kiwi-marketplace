@@ -583,8 +583,8 @@ describe('Image Storage V1 (e2e)', () => {
         .set('Authorization', `Bearer ${ownerToken}`)
         .expect(200);
 
-      const posts = response.body as PostResponse[];
-      const resolved = posts.flatMap((p) => p.images).map((i) => i.imageUrl);
+      const { items } = response.body as { items: PostResponse[] };
+      const resolved = items.flatMap((p) => p.images).map((i) => i.imageUrl);
       expect(resolved).toContain(`${R2_PUBLIC_BASE_URL}/${key}`);
     });
 
