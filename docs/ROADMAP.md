@@ -134,9 +134,9 @@
 
 ## Phase 9 - Favorites
 
-- [ ] Favorite Post
-- [ ] Remove Favorite
-- [ ] My Favorites
+- [x] Favorite Post
+- [x] Remove Favorite
+- [x] My Favorites
 
 ---
 
