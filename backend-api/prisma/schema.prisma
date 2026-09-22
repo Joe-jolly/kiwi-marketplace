@@ -47,7 +47,8 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  posts Post[]
+  posts     Post[]
+  favorites Favorite[]
 }
 
 model Category {
@@ -94,7 +95,8 @@ model Post {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  images PostImage[]
+  images    PostImage[]
+  favorites Favorite[]
 
   @@index([ownerId])
   @@index([categoryId])
@@ -111,4 +113,24 @@ model PostImage {
   createdAt    DateTime @default(now())
 
   @@id([postId, displayOrder])
+}
+
+// Bridge table for the User <-> Post many-to-many "saved listings"
+// relationship (Database Constitution §10). Composite PK (no separate
+// `id`, no `updatedAt`) mirrors `PostImage`'s precedent — rows here are
+// create/delete-only, never updated in place. The composite PK itself
+// satisfies the Database Constitution's mandated `UNIQUE(user_id, post_id)`;
+// `@@index([postId])` adds the reverse lookup the same section requires
+// (the PK's own index only optimizes `userId`-first lookups).
+model Favorite {
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  postId String
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([userId, postId])
+  @@index([postId])
 }
