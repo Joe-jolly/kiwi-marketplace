@@ -142,15 +142,24 @@
 
 ## Phase 10 - Chat
 
-- [ ] Chat Creation
-- [ ] Messages
-- [ ] Socket.IO
-- [ ] Unread Count
-- [ ] Message Read Status
+- [x] Chat Creation
+- [x] Messages
+- [x] Socket.IO
+- [x] Unread Count
+- [x] Message Read Status
 
 ---
 
-## Phase 11 - Notifications
+## Phase 11 - Reservation
+
+- [ ] Select Buyer
+- [ ] Reserve Listing
+- [ ] Reveal Phone Number
+- [ ] Complete Listing
+
+---
+
+## Phase 12 - Notifications
 
 - [ ] Notification Entity
 - [ ] Notification API
@@ -158,7 +167,7 @@
 
 ---
 
-## Phase 12 - Admin Panel
+## Phase 13 - Admin Panel
 
 - [ ] React Admin Setup
 - [ ] Admin Authentication
@@ -169,7 +178,7 @@
 
 ---
 
-## Phase 13 - Mobile App
+## Phase 14 - Mobile App
 
 - [ ] React Native Setup
 - [ ] Authentication
@@ -182,7 +191,7 @@
 
 ---
 
-## Phase 14 - Production
+## Phase 15 - Production
 
 - [ ] Environment Configuration
 - [ ] Docker Production
@@ -196,14 +205,14 @@
 
 ---
 
-## Phase 15 - Release
+## Phase 16 - Release
 
 - [ ] Build Android APK
 - [ ] Google Play Store
 
 ---
 
-## Phase 16 - Feed Improvements
+## Phase 17 - Feed Improvements
 
 - [ ] Include RESERVED Posts in Feed
 - [ ] Display Reserved Badge
