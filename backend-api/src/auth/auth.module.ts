@@ -20,5 +20,10 @@ type JwtExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
   ],
   providers: [AuthService, JwtStrategy],
   controllers: [AuthController],
+  // Exported so other modules (`ChatsModule`'s Socket.IO gateway) can reuse
+  // this already-configured `JwtService` singleton to verify a handshake
+  // token, instead of a second `JwtModule.register({...})` with duplicated
+  // secret/expiry config (backend rule: avoid duplicated code).
+  exports: [JwtModule],
 })
 export class AuthModule {}
