@@ -360,11 +360,31 @@ Create Chat
 
 Get Chats
 
+Get Chat
+
 Get Messages
 
 Send Message
 
+Mark Chat Read
+
 Realtime communication uses Socket.IO.
+
+**Amendment (Phase 10 implementation, current authoritative contract):** the operations above are implemented as REST, with Socket.IO layered on top as a push-notification channel, not as an alternative write path:
+
+* Create Chat / Send Message — `POST /posts/:postId/messages` (creates the chat lazily on the first message, or reuses an existing one) and `POST /chats/:chatId/messages` (send on a chat that already exists, either side). Chat creation is lazy (Chat Constitution, §18 of the Technical Constitution): no `Chat` row exists until the first message is actually sent.
+* Get Chats — `GET /chats`, cursor-paginated (§9) like every other list endpoint, sorted by most-recently-active conversation first (`lastMessageAt desc, id desc`), not by chat-creation time.
+* Get Chat — `GET /chats/:chatId`, single chat detail (not one of the operations originally named above, added because both the mobile app and the Socket.IO layer need a single-chat fetch — e.g. to resolve a `chatId` a client doesn't yet have full details for).
+* Get Messages — `GET /chats/:chatId/messages`, cursor-paginated, newest-first (`createdAt desc, id desc`).
+* Mark Chat Read — `POST /chats/:chatId/reads` (not one of the operations originally named above; required by the read-receipt design, §16 of the UI-UX Constitution — advances the caller's own read watermark).
+* A chat that exists but the caller is not part of returns `403`, not `404` — chat ids are opaque, non-enumerable UUIDs, unlike e.g. a hidden post, so there is no existence-hiding benefit to a blanket 404 here.
+
+Realtime contract (Socket.IO): every authenticated socket joins a single room, `user:<userId>`, on connect — there is no per-chat room and no client-emitted business event. The server pushes two events, both mirroring the REST response shapes above and delivered to both sides of the chat:
+
+* `message:new` — `{ id, chatId, senderId, content, createdAt }`, emitted after a `POST .../messages` call has already committed.
+* `chat:read` — `{ chatId, readByUserId, readAt }`, emitted after a `POST /chats/:chatId/reads` call has already committed.
+
+REST remains the sole source of truth. Socket.IO carries no delivery guarantee and no message replay: a client that misses events while disconnected catches up entirely through the cursor-paginated REST endpoints above on reconnect, not through any Socket.IO-side backlog.
 
 Business Rule:
 
@@ -379,6 +399,8 @@ One Participant
 One Chat
 
 Duplicate chats are prohibited.
+
+A COMPLETED post accepts no *new* chats (Reservation Constitution, §22 of the Database Constitution) — `POST /posts/:postId/messages` returns `409` when no chat yet exists for that post/participant pair and the post is COMPLETED. An already-existing chat is unaffected by the post's later status and keeps accepting messages via `POST /chats/:chatId/messages`.
 
 ---
 
