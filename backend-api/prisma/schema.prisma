@@ -47,8 +47,10 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  posts     Post[]
-  favorites Favorite[]
+  posts              Post[]
+  favorites          Favorite[]
+  chatsAsParticipant Chat[]
+  sentMessages       Message[]
 }
 
 model Category {
@@ -97,6 +99,7 @@ model Post {
 
   images    PostImage[]
   favorites Favorite[]
+  chats     Chat[]
 
   @@index([ownerId])
   @@index([categoryId])
@@ -133,4 +136,60 @@ model Favorite {
 
   @@id([userId, postId])
   @@index([postId])
+}
+
+// One Post x One Participant = One Chat (Database Constitution §11/§21,
+// Technical Constitution §18). "Participant" is always the non-owner side;
+// the owner side is derived from `post.ownerId`, not denormalized here —
+// the Database Constitution's required-index list for Chat names only
+// `post_id`/`participant_id`, not an owner column.
+//
+// `ownerLastReadAt`/`participantLastReadAt` are the approved Step 1 design
+// for read receipts: a per-side "read up to this time" watermark, not a
+// per-message `readAt`. A message shows the UI's ✓✓ state (UI-UX
+// Constitution §16) whenever `message.createdAt <= theOtherSide'sWatermark`
+// — fully derivable client-side, no per-message write needed.
+//
+// `lastMessageAt` is a small, necessary addition beyond the Step 0 plan
+// (flagged in the Step 1 report): without it, "my chats" would only be
+// sortable by when the chat first started, not by recent activity, which
+// is the sort order every chat UI (and "ChatList", UI-UX Constitution §6)
+// actually needs. Updated in the same transaction as each new `Message`.
+model Chat {
+  id String @id @default(uuid())
+
+  postId String
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  participantId String
+  participant   User   @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime  @default(now())
+  lastMessageAt DateTime  @default(now())
+
+  ownerLastReadAt       DateTime?
+  participantLastReadAt DateTime?
+
+  messages Message[]
+
+  @@unique([postId, participantId])
+  @@index([participantId])
+}
+
+// Text-only in MVP (Database Constitution §12, MVP Scope Lock §21 —
+// images/files/voice explicitly excluded). Immutable, append-only: no
+// `updatedAt`, mirroring the `PostImage`/`Favorite` precedent.
+model Message {
+  id String @id @default(uuid())
+
+  chatId String
+  chat   Chat   @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  senderId String
+  sender   User   @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([chatId, createdAt])
 }

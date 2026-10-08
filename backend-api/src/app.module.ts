@@ -6,6 +6,7 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { PostsModule } from './posts/posts.module';
 import { FavoritesModule } from './favorites/favorites.module';
+import { ChatsModule } from './chats/chats.module';
 import { StorageModule } from './storage/storage.module';
 
 // `StorageModule` is `@Global()` (like `PrismaModule`), but Nest still
@@ -20,6 +21,7 @@ import { StorageModule } from './storage/storage.module';
     AuthModule,
     PostsModule,
     FavoritesModule,
+    ChatsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
