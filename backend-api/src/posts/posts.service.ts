@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PostStatus, UserRole, type Prisma, type User } from '@prisma/client';
+import { ChatsGateway } from '../chats/chats.gateway';
 import { CursorPaginationQueryDto } from '../common/dto/cursor-pagination-query.dto';
 import {
   decodeKeysetCursor,
@@ -16,6 +17,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { FindPostsQueryDto } from './dto/find-posts-query.dto';
+import { SelectBuyerDto } from './dto/select-buyer.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import {
   CursorFields,
@@ -26,8 +28,14 @@ import {
 import { FeedQueryBuilder } from './feed/feed-query.builder';
 import { GeoFeedQueryBuilder, GeoFeedRow } from './feed/geo-feed-query.builder';
 import { SortOption } from './feed/sort-option.enum';
+import { canViewSellerPhone } from './phone-visibility.util';
 import { isPostHiddenFromPublic } from './post-visibility.util';
-import { postDetailSelect, postFeedSelect } from './post.select';
+import {
+  postDetailSelect,
+  postDetailWithPhoneSelect,
+  postFeedSelect,
+  reservablePostSelect,
+} from './post.select';
 import { resolveImageUrls } from './resolve-image-urls.util';
 
 /** Scopes `GET /posts/me`'s cursor so it can't be replayed against another
@@ -44,6 +52,12 @@ type MutablePostState = {
 };
 
 type FeedRow = Prisma.PostGetPayload<{ select: typeof postFeedSelect }>;
+type PostDetailWithPhoneRow = Prisma.PostGetPayload<{
+  select: typeof postDetailWithPhoneSelect;
+}>;
+type ReservablePostState = Prisma.PostGetPayload<{
+  select: typeof reservablePostSelect;
+}>;
 // `distance` and `relevance` are attached only by the raw-SQL paths (from
 // `GeoFeedRow.distanceMeters` / `GeoFeedRow.relevanceScore`), used
 // internally to build the next cursor, and stripped before the response is
@@ -63,6 +77,7 @@ export class PostsService {
     private readonly feedQueryBuilder: FeedQueryBuilder,
     private readonly geoFeedQueryBuilder: GeoFeedQueryBuilder,
     private readonly storageService: StorageService,
+    private readonly chatsGateway: ChatsGateway,
   ) {}
 
   async findAll(query: FindPostsQueryDto) {
@@ -359,7 +374,7 @@ export class PostsService {
   async findOne(id: string, viewer?: User) {
     const post = await this.prisma.post.findUnique({
       where: { id },
-      select: postDetailSelect,
+      select: postDetailWithPhoneSelect,
     });
 
     if (!post) {
@@ -371,7 +386,39 @@ export class PostsService {
       throw new NotFoundException('Post not found');
     }
 
-    return resolveImageUrls(this.storageService, post);
+    return this.applyPhoneVisibility(
+      resolveImageUrls(this.storageService, post),
+      viewer?.id,
+    );
+  }
+
+  /**
+   * Strips the internal `reservedChat` helper field (never part of the
+   * public contract — it exists only so `canViewSellerPhone()` can resolve
+   * the reserved chat's `participantId`) and conditionally strips
+   * `owner.phone` unless `viewerId` is the selected buyer on an already
+   * `RESERVED`/`COMPLETED` post (Reservation phone-visibility rule). Only
+   * `findOne()` has an arbitrary, per-request viewer, so this is the only
+   * caller.
+   */
+  private applyPhoneVisibility(
+    post: PostDetailWithPhoneRow,
+    viewerId: string | undefined,
+  ): Omit<PostDetailWithPhoneRow, 'reservedChat'> {
+    const reservedChatParticipantId = post.reservedChat?.participantId ?? null;
+    const canSeePhone =
+      viewerId !== undefined &&
+      canViewSellerPhone(post, reservedChatParticipantId, viewerId);
+
+    const { reservedChat, owner, ...rest } = post;
+    void reservedChat;
+
+    const resultOwner = { ...owner };
+    if (!canSeePhone) {
+      delete (resultOwner as { phone?: string }).phone;
+    }
+
+    return { ...rest, owner: resultOwner };
   }
 
   async update(id: string, user: User, dto: UpdatePostDto) {
@@ -538,6 +585,105 @@ export class PostsService {
     });
   }
 
+  /**
+   * `POST /posts/:id/reservation` — "Select Buyer" + "Reserve Listing"
+   * (Project Constitution §8 Rules 4/5), implemented as one atomic action:
+   * selecting a chat *is* reserving the listing, not two separate steps.
+   * Owner-only, requires the post currently be `ACTIVE` (409 otherwise,
+   * including an already-`RESERVED` post — "only one reservation may
+   * exist per post", Database Constitution §22 / Technical Constitution
+   * §19), and the submitted `chatId` must be an existing chat on this same
+   * post (Rule 4: "Seller can select only one chat" — selection operates
+   * on a chat, not a bare buyer id; the chat's `participantId` becomes the
+   * reserved buyer, derived, never duplicated).
+   *
+   * Reverting `RESERVED` back to `ACTIVE` and replacing an already-selected
+   * buyer are explicitly out of scope for this MVP (see `BACKLOG.md`,
+   * "Reservation (Phase 11)") — the state machine below only ever moves
+   * forward.
+   */
+  async selectBuyer(postId: string, user: User, dto: SelectBuyerDto) {
+    const chat = await this.prisma.chat.findUnique({
+      where: { id: dto.chatId },
+      select: { id: true, postId: true, participantId: true },
+    });
+
+    if (!chat || chat.postId !== postId) {
+      throw new NotFoundException('Chat not found for this post');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const post = await tx.post.findUnique({
+        where: { id: postId },
+        select: reservablePostSelect,
+      });
+
+      this.assertPostCanBeReserved(post, user);
+
+      return tx.post.update({
+        where: { id: post.id },
+        data: {
+          reservedChatId: chat.id,
+          reservedAt: new Date(),
+          status: PostStatus.RESERVED,
+        },
+        select: postDetailSelect,
+      });
+    });
+
+    this.chatsGateway.notifyPostStatusChanged([user.id, chat.participantId], {
+      postId: updated.id,
+      status: updated.status,
+      reservedChatId: chat.id,
+    });
+
+    return resolveImageUrls(this.storageService, updated);
+  }
+
+  /**
+   * `POST /posts/:id/completion` — "Complete Listing". Owner-only, requires
+   * the post currently be `RESERVED` (409 from `ACTIVE` — a deal implies a
+   * completed reservation; the Core User Journey, Project Constitution §6,
+   * is a strict linear `Chat -> Select Buyer -> Phone visible -> Deal`
+   * chain with no branch that skips reservation). `COMPLETED` is terminal
+   * for this MVP — no path back to `RESERVED`/`ACTIVE`.
+   *
+   * Deliberately does **not** touch `ChatsService`/`Message` at all: the
+   * approved Step 0 decision keeps the Phase 10 "COMPLETED blocks only new
+   * chat creation" behavior unchanged — existing chats remain fully
+   * writable after completion.
+   */
+  async completeListing(postId: string, user: User) {
+    let reservedParticipantId!: string;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const post = await tx.post.findUnique({
+        where: { id: postId },
+        select: reservablePostSelect,
+      });
+
+      this.assertPostCanBeCompleted(post, user);
+      reservedParticipantId = post.reservedChat.participantId;
+
+      return tx.post.update({
+        where: { id: post.id },
+        data: { status: PostStatus.COMPLETED, completedAt: new Date() },
+        select: postDetailSelect,
+      });
+    });
+
+    this.chatsGateway.notifyPostStatusChanged(
+      [user.id, reservedParticipantId],
+      {
+        postId: updated.id,
+        status: updated.status,
+        reservedChatId: updated.reservedChatId,
+      },
+    );
+
+    return resolveImageUrls(this.storageService, updated);
+  }
+
   async create(user: User, dto: CreatePostDto) {
     this.assertImageKeysOwnedBy(dto.imageKeys, user.id);
 
@@ -643,6 +789,58 @@ export class PostsService {
 
     if (post.status !== PostStatus.ACTIVE) {
       throw new ConflictException(inactivePostMessage);
+    }
+  }
+
+  /**
+   * `selectBuyer()`'s precondition: owner-only, and the post must
+   * currently be `ACTIVE` — 409 otherwise, including an already-`RESERVED`
+   * post (Database Constitution §22: "only one reservation may exist per
+   * post" — this MVP has no buyer-replacement path, see `BACKLOG.md`).
+   */
+  private assertPostCanBeReserved(
+    post: ReservablePostState | null,
+    user: User,
+  ): asserts post is ReservablePostState {
+    if (!post) {
+      throw new NotFoundException('Post not found');
+    }
+
+    if (post.ownerId !== user.id) {
+      throw new ForbiddenException();
+    }
+
+    if (post.status !== PostStatus.ACTIVE) {
+      throw new ConflictException(
+        'Only an active post can have a buyer selected',
+      );
+    }
+  }
+
+  /**
+   * `completeListing()`'s precondition: owner-only, and the post must
+   * currently be `RESERVED` — 409 from `ACTIVE` (reservation cannot be
+   * skipped, per the Core User Journey's strict linear flow) and 409 from
+   * an already-`COMPLETED` post (terminal state for this MVP). Also
+   * narrows `post.reservedChat` to non-null, since a `RESERVED` post is
+   * only ever reached through `selectBuyer()`, which always sets it.
+   */
+  private assertPostCanBeCompleted(
+    post: ReservablePostState | null,
+    user: User,
+  ): asserts post is ReservablePostState & {
+    reservedChat: { participantId: string };
+  } {
+    if (!post) {
+      throw new NotFoundException('Post not found');
+    }
+
+    if (post.ownerId !== user.id) {
+      throw new ForbiddenException();
+    }
+
+    if (post.status !== PostStatus.RESERVED || !post.reservedChat) {
+      throw new ConflictException('Only a reserved post can be completed');
     }
   }
 }

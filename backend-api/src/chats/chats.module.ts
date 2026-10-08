@@ -13,5 +13,10 @@ import { ChatsService } from './chats.service';
   imports: [AuthModule, UsersModule],
   controllers: [ChatsController],
   providers: [ChatsService, ChatsGateway],
+  // `PostsModule` (Phase 11 Reservation) also needs `ChatsGateway` to emit
+  // the best-effort `post:status-changed` realtime event from
+  // `selectBuyer()`/`completeListing()`, reusing this gateway's existing
+  // per-user-room infrastructure instead of duplicating it.
+  exports: [ChatsGateway],
 })
 export class ChatsModule {}

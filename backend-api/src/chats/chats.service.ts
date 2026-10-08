@@ -11,6 +11,7 @@ import {
   decodeKeysetCursor,
   encodeKeysetCursor,
 } from '../common/pagination/keyset-cursor.util';
+import { canViewSellerPhone } from '../posts/phone-visibility.util';
 import { isPostHiddenFromPublic } from '../posts/post-visibility.util';
 import { mutablePostSelect } from '../posts/post.select';
 import { resolveImageUrls } from '../posts/resolve-image-urls.util';
@@ -337,7 +338,10 @@ export class ChatsService {
 
   private buildChatSummary(chat: ChatSummaryRow, callerId: string) {
     const role = chat.post.owner.id === callerId ? 'owner' : 'participant';
-    const otherUser = role === 'owner' ? chat.participant : chat.post.owner;
+    const otherUser =
+      role === 'owner'
+        ? chat.participant
+        : this.applySellerPhoneVisibility(chat, callerId);
     const myLastReadAt =
       role === 'owner' ? chat.ownerLastReadAt : chat.participantLastReadAt;
     const post = resolveImageUrls(this.storageService, chat.post);
@@ -357,6 +361,34 @@ export class ChatsService {
       lastMessage: chat.messages[0] ?? null,
       myLastReadAt,
     };
+  }
+
+  /**
+   * Only reached when the caller is this chat's `participant` (the
+   * potential buyer), viewing `chat.post.owner` (the seller) as
+   * `otherUser`. Strips `owner.phone` unless this chat is the post's
+   * `reservedChat` and the post is `RESERVED`/`COMPLETED` — the
+   * Reservation phone-visibility rule (Phase 11, `canViewSellerPhone()`).
+   * The reverse direction (owner viewing the participant) never includes
+   * a `phone` field at all — `chat.participant`'s select deliberately
+   * doesn't select it, since no document describes a seller-sees-buyer's-
+   * phone rule.
+   */
+  private applySellerPhoneVisibility(chat: ChatSummaryRow, callerId: string) {
+    const reservedChatParticipantId =
+      chat.post.reservedChatId === chat.id ? chat.participantId : null;
+    const canSeePhone = canViewSellerPhone(
+      chat.post,
+      reservedChatParticipantId,
+      callerId,
+    );
+
+    const owner = { ...chat.post.owner };
+    if (!canSeePhone) {
+      delete (owner as { phone?: string }).phone;
+    }
+
+    return owner;
   }
 
   /** Bounded (`page limit` many, never unbounded) per-row `count()` calls —

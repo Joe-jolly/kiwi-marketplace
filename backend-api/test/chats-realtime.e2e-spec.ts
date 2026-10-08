@@ -26,6 +26,16 @@ const E2E_DATABASE_URL =
 // round trip under concurrent load doesn't get mistaken for a real hang.
 jest.setTimeout(15000);
 
+// Bumped from the original 5000ms (Phase 11 Reservation added two more
+// real-socket e2e suites — `reservation-realtime.e2e-spec.ts` plus the
+// REST `reservation.e2e-spec.ts` running alongside everything else —
+// increasing full-suite concurrent load further and occasionally pushing
+// a perfectly fine, just-slower round trip past the old threshold;
+// observed once in 4 consecutive full `test:e2e` runs). Same reasoning as
+// the existing `jest.setTimeout(15000)` above, just applied to these
+// helpers' own internal wait timers too.
+const WAIT_TIMEOUT_MS = 10000;
+
 describe('Phase 10 Chat — Socket.IO realtime (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
@@ -199,7 +209,7 @@ describe('Phase 10 Chat — Socket.IO realtime (e2e)', () => {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new Error(`Timed out waiting for "${event}"`));
-      }, 5000);
+      }, WAIT_TIMEOUT_MS);
 
       socket.once(event, (payload: T) => {
         clearTimeout(timer);
@@ -212,11 +222,21 @@ describe('Phase 10 Chat — Socket.IO realtime (e2e)', () => {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new Error('Timed out waiting to connect'));
-      }, 5000);
+      }, WAIT_TIMEOUT_MS);
 
       socket.once('connect', () => {
         clearTimeout(timer);
-        resolve();
+        // Small grace period: the client's `connect` event fires once the
+        // transport handshake completes, which can race slightly ahead of
+        // the server's own async `handleConnection` (JWT verify + user
+        // lookup + `client.join(...)`) finishing — more likely to show up
+        // under heavier concurrent load (Phase 11 added more real-socket
+        // e2e suites running alongside this one). Without this, a request
+        // issued immediately after `connect` can occasionally reach the
+        // server before the socket has actually joined its room, silently
+        // missing a broadcast. Test-timing fix only; Socket.IO itself has
+        // no delivery guarantee, by design.
+        setTimeout(resolve, 150);
       });
       socket.connect();
     });
@@ -232,7 +252,7 @@ describe('Phase 10 Chat — Socket.IO realtime (e2e)', () => {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new Error('Timed out waiting for disconnect'));
-      }, 5000);
+      }, WAIT_TIMEOUT_MS);
 
       socket.once('disconnect', (reason: string) => {
         clearTimeout(timer);

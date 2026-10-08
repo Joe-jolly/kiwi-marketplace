@@ -22,6 +22,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CursorPaginationQueryDto } from '../common/dto/cursor-pagination-query.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import { FindPostsQueryDto } from './dto/find-posts-query.dto';
+import { SelectBuyerDto } from './dto/select-buyer.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { PostsService } from './posts.service';
 
@@ -78,6 +79,25 @@ export class PostsController {
   @UseGuards(JwtAuthGuard)
   restore(@Param('id') id: string, @CurrentUser() user: User) {
     return this.postsService.restore(id, user);
+  }
+
+  // "Select Buyer" + "Reserve Listing" (Project Constitution §8 Rules
+  // 4/5), one atomic action — see `PostsService.selectBuyer()`.
+  @Post(':id/reservation')
+  @UseGuards(JwtAuthGuard)
+  selectBuyer(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+    @Body() dto: SelectBuyerDto,
+  ) {
+    return this.postsService.selectBuyer(id, user, dto);
+  }
+
+  // "Complete Listing" — see `PostsService.completeListing()`.
+  @Post(':id/completion')
+  @UseGuards(JwtAuthGuard)
+  completeListing(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.postsService.completeListing(id, user);
   }
 
   @Post()

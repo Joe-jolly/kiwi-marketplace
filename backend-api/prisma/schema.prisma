@@ -97,6 +97,30 @@ model Post {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Reservation Constitution (Database Constitution §22, Technical
+  // Constitution §19, Project Constitution §8 Rules 4/5): "Seller can
+  // select only one chat" / "Selected chat changes post status to
+  // Reserved." A single nullable, unique FK to the selected `Chat` is the
+  // entire reservation record — no separate `Reservation` model, since the
+  // uniqueness constraint alone already enforces "only one reservation may
+  // exist per post" and the "selected buyer" is always *derived* via
+  // `reservedChat.participantId`, never duplicated into its own column
+  // (same reasoning as every other denormalization decision in this
+  // schema: a single source of truth, no sync-drift risk).
+  //
+  // `reservedAt`/`completedAt` mirror the existing `deletedAt` precedent
+  // (nullable, set once on transition into that state) and additionally
+  // support the Project Constitution's own "Reserved Posts" KPI / "First
+  // Reservation" milestone (§21/§22).
+  //
+  // Phase 11 Step 0 explicitly scoped the state machine to
+  // ACTIVE -> RESERVED -> COMPLETED only; reverting RESERVED -> ACTIVE or
+  // replacing the selected buyer is out of MVP scope (see BACKLOG.md).
+  reservedChatId String?   @unique
+  reservedChat   Chat?     @relation("ReservedChat", fields: [reservedChatId], references: [id], onDelete: SetNull)
+  reservedAt     DateTime?
+  completedAt    DateTime?
+
   images    PostImage[]
   favorites Favorite[]
   chats     Chat[]
@@ -171,6 +195,12 @@ model Chat {
   participantLastReadAt DateTime?
 
   messages Message[]
+
+  // Inverse side of `Post.reservedChat` (Phase 11 Reservation). A chat can
+  // be at most one post's reserved chat — already implied by `Post`'s own
+  // `@unique` FK column, this is just Prisma's required named-relation
+  // back-reference, not an independent constraint.
+  reservedForPost Post? @relation("ReservedChat")
 
   @@unique([postId, participantId])
   @@index([participantId])

@@ -37,8 +37,18 @@ export const chatSummarySelect = {
       title: true,
       price: true,
       status: true,
+      // Phase 11 Reservation: `reservedChatId` + `owner.phone` let
+      // `ChatsService.buildChatSummary()` compute per-viewer seller
+      // phone-number visibility (`canViewSellerPhone()`) — safe to select
+      // here unconditionally because `buildChatSummary()` is the *only*
+      // consumer of `chatSummarySelect` (via `findMine()`/`findOne()`),
+      // and it always strips `owner.phone` before returning unless the
+      // caller is the authorized selected buyer. Unlike `postDetailSelect`,
+      // there's no other, non-stripping consumer of this select to worry
+      // about leaking it through.
+      reservedChatId: true,
       owner: {
-        select: { id: true, displayName: true, avatarUrl: true },
+        select: { id: true, displayName: true, avatarUrl: true, phone: true },
       },
       images: {
         orderBy: { displayOrder: 'asc' },

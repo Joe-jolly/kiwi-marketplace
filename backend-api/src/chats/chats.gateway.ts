@@ -5,6 +5,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import type { PostStatus } from '@prisma/client';
 import type { Server, Socket } from 'socket.io';
 import { UsersService } from '../users/users.service';
 
@@ -24,6 +25,11 @@ export interface ChatReadEventPayload {
   chatId: string;
   readByUserId: string;
   readAt: Date;
+}
+export interface PostStatusChangedEventPayload {
+  postId: string;
+  status: PostStatus;
+  reservedChatId: string | null;
 }
 
 /** Every authenticated socket joins exactly one room, keyed by user id —
@@ -125,6 +131,21 @@ export class ChatsGateway implements OnGatewayConnection {
     payload: ChatReadEventPayload,
   ): void {
     this.emitToUsers(participantUserIds, 'chat:read', payload);
+  }
+
+  /**
+   * Called by `PostsService.selectBuyer()`/`completeListing()` after the
+   * status transition has already committed via REST (Phase 11
+   * Reservation, approved Step 0 decision). `Post.status` itself remains
+   * the source of truth — this is purely an optional, best-effort realtime
+   * nudge, not a new write path; neither `Message.type` nor the
+   * `Notification` entity was introduced for this.
+   */
+  notifyPostStatusChanged(
+    userIds: readonly string[],
+    payload: PostStatusChangedEventPayload,
+  ): void {
+    this.emitToUsers(userIds, 'post:status-changed', payload);
   }
 
   private extractToken(client: Socket): string | undefined {
