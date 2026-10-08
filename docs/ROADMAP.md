@@ -152,10 +152,10 @@
 
 ## Phase 11 - Reservation
 
-- [ ] Select Buyer
-- [ ] Reserve Listing
-- [ ] Reveal Phone Number
-- [ ] Complete Listing
+- [x] Select Buyer
+- [x] Reserve Listing
+- [x] Reveal Phone Number
+- [x] Complete Listing
 
 ---
 

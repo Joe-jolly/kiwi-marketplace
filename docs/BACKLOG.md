@@ -116,3 +116,58 @@ These three items were surfaced while designing Chat/the realtime layer but are 
 - **CORS configuration** — `main.ts` has no CORS configuration today (neither REST nor Socket.IO). Not a defect: ADR-005 (Image Storage Architecture) already establishes the precedent that CORS is correctly deferred until "any web client" exists ("No CORS configuration is required (irrelevant to the planned React Native client, and not yet needed for any web client)"). The first and only currently-roadmapped browser-origin client is **Phase 13 - Admin Panel** — CORS should be configured there (`app.enableCors()` and/or the Socket.IO gateway's `cors` option), with final allowed-origins lockdown per environment folded into **Phase 15 - Production**'s "Environment Configuration"/"Nginx" work. MVP-required by the time Admin Panel ships; not required, and correctly absent, before then.
 - **User Blocking** — Technical Constitution §21 ("Users may block other users. Blocked users may not: start new chats, continue interactions") and MVP Scope Lock §5/§15 (`Block User`/`User Blocking`, both **Approved** — i.e. in-MVP-scope, not a future-version exclusion) require this, but there is no `Block` model and no ROADMAP phase for it yet in the current `docs/ROADMAP.md` (V3). Two other project documents already anticipate a phase for it under an older numbering scheme: `docs/07-development-constitution.md` §3's "Approved Sequence" places **Reports** between Notifications and Admin Panel (position 11 of 13), and `docs/09-implementation-roadmap.md`'s old Phase 12, "Reports & Safety," explicitly bundles `Report User` / `Report Post` / `Block User` / `Moderation Tools` together — consistent with `docs/01-project-constitution.md` §12 ("Trust & Safety") grouping the same items. **Proposed placement:** a new "Reports & Safety" phase in `docs/ROADMAP.md`, inserted after Notifications (Phase 12) and before Admin Panel (Phase 13), covering Report Post/Report User/User Blocking/Admin Moderation together — not inserted as part of this closeout, since only the Reservation-phase insertion was approved; recorded here as a proposal for a future documentation pass. When implemented, `Block` would likely follow the `Favorite` bridge-table pattern (composite key over the two user ids), and `ChatsService.sendFirstMessage()`/`sendMessage()` would need a small, additive block-check — not a redesign of anything Phase 10 already shipped.
 - **`Message.type`** — `Message` has only `content`/`createdAt`/`senderId` today; every message is implicitly a plain user chat message. MVP Scope Lock §12 ("Chat") lists `Reservation Flow` inside Chat's own Included bullet list (alongside Realtime Messaging and Read Receipts), which is the one — admittedly loose — documented link suggesting reservation status changes might need to surface inside a chat thread (e.g. a "buyer selected" system entry), which a plain-text-only `Message` can't represent. **Proposed placement:** decide and, if needed, implement this as part of **Phase 11 - Reservation**'s own Step 0 design audit, not now — that audit should explicitly weigh a `Message.type` addition (`'text' | 'system'`, following the `PostStatus`-style enum precedent) against simply routing reservation events through the already-separate `Notification` entity instead (Database Constitution §13 already lists `Reservation` as a `Notification` type), since the latter may satisfy the product need without touching the just-shipped `Message` model at all. Not MVP-blocking for Phase 10; dependency is Phase 11's own Step 0, not Phase 10.
+  - **Resolved by the Phase 11 Step 0 audit:** neither option was taken. `Post.status` (already-shipped REST field) is the authoritative signal, paired with a new `post:status-changed` Socket.IO event reusing the existing per-user-room `ChatsGateway` infrastructure. No `Message.type` column was added; no `Notification` entity was built. See "Reservation (Phase 11)" below.
+
+## Reservation (Phase 11)
+
+- **Architecture & Database Schema:**
+  - Added `Post.reservedChatId` (`String? @unique`), foreign key to `Chat` with `onDelete: SetNull`.
+  - Added `Post.reservedAt` (`DateTime?`) and `Post.completedAt` (`DateTime?`), mirroring the existing nullable `Post.deletedAt` pattern and supporting Project Constitution §21/§22 KPIs ("Reserved Posts" KPI, "First Reservation" milestone).
+  - Added `Chat.reservedForPost` (`Post? @relation("ReservedChat")`) as the named Prisma relation back-reference.
+  - Migration `20261008000000_add_post_reservation_fields` applied via `prisma migrate deploy`. Generated via a shadow-database diff (`kiwi_shadow_p11` from `template_postgis`), hand-trimming spurious `DROP INDEX` / `ALTER COLUMN location` statements caused by Prisma's generated PostGIS geography column (ADR-004).
+  - **Single Unique FK Design:** No separate `Reservation` join model was created. A single `@unique` nullable foreign key on `Post` structurally enforces the Database Constitution §22 rule ("Only one reservation may exist per post") without table bloat. The selected buyer is always derived dynamically via `reservedChat.participantId`, eliminating redundant columns and sync-drift risks.
+- **REST Endpoints & Request/Response Contracts:**
+  - `POST /posts/:id/reservation` ("Select Buyer" & "Reserve Listing", implemented as one atomic action per Project Constitution §8 Rules 4/5):
+    - Input: `SelectBuyerDto { chatId: string }`.
+    - Authorization: Authenticated, post owner only (`403 Forbidden` if `user.id !== post.ownerId`).
+    - Precondition: Post must be in `ACTIVE` status (`409 Conflict` otherwise, including already-`RESERVED` — "Only one reservation may exist per post").
+    - Chat verification: The submitted `chatId` must exist and belong to this post (`chat.postId === post.id`), returning `404 Not Found` otherwise.
+    - Effect: Atomically sets `reservedChatId = chat.id`, `reservedAt = now()`, `status = RESERVED`. Returns updated post detail (`postDetailSelect`, 201).
+  - `POST /posts/:id/completion` ("Complete Listing"):
+    - Input: No body required.
+    - Authorization: Authenticated, post owner only (`403 Forbidden` if `user.id !== post.ownerId`).
+    - Precondition: Post must currently be in `RESERVED` status (`409 Conflict` from `ACTIVE`, `COMPLETED`, or any other status).
+    - Effect: Atomically sets `status = COMPLETED`, `completedAt = now()`. Returns updated post detail (`postDetailSelect`, 201).
+- **State Machine & Lifecycle Transitions:**
+  - Allowed transitions are strictly forward-only: `ACTIVE → RESERVED → COMPLETED`.
+  - `ACTIVE → COMPLETED` directly is rejected with `409 Conflict`: Core User Journey (§6) mandates `Chat → Select Buyer → Phone visible → Deal`. A deal implies a prior completed reservation; skipping reservation is forbidden.
+  - `COMPLETED` is terminal for MVP: no transition out of `COMPLETED` is allowed (`409 Conflict`).
+- **Seller Phone-Number Visibility Rules:**
+  - One-directional: only the selected buyer (`reservedChat.participantId`) gains visibility of the seller's phone number (`owner.phone`) once the post reaches `RESERVED` or `COMPLETED`.
+  - Pure, state-based evaluation: `canViewSellerPhone()` in `src/posts/phone-visibility.util.ts` dynamically evaluates `isReservationActive && reservedChatParticipantId === viewerId` on every read. No static boolean flag is persisted.
+  - Endpoints exposing the phone:
+    - `GET /posts/:id`: uses `postDetailWithPhoneSelect`, which conditionally includes `owner.phone` for the authorized buyer and strips it for all other callers.
+    - `GET /chats` and `GET /chats/:chatId`: `buildChatSummary()` in `ChatsService` conditionally includes `otherUser.phone` when the caller is the chat participant on a reserved/completed post.
+  - Strict privacy gating: The seller never gains access to the buyer's phone number (reverse visibility is prohibited per Technical Constitution §19 and Project Constitution §8 Rule 6). Unauthenticated callers, other non-selected chat participants, and the owner viewing their own post never receive the phone field.
+- **Socket.IO Realtime Layer (`post:status-changed`):**
+  - Event contract: `post:status-changed` with payload `{ postId: string, status: PostStatus, reservedChatId: string | null }`.
+  - Gateway method: `ChatsGateway.notifyPostStatusChanged()`, emitted to the `user:<userId>` rooms of both the post owner and the selected buyer.
+  - Non-throwing, best-effort: failure to emit via Socket.IO is caught and logged, never failing the underlying REST mutation.
+  - REST remains the sole source of truth and fallback: disconnected clients catch up via REST endpoints on reconnect.
+  - Module wiring: `ChatsModule` exports `ChatsGateway`, which is imported by `PostsModule`.
+- **COMPLETED-Post Chat Behavior Preserved:**
+  - Upheld Phase 10 approved decision: Database Constitution §22 ("Completed post: read-only, no new chats") blocks only *new chat creation* (`POST /posts/:postId/messages` returns `409 Conflict` when no chat exists yet).
+  - Existing chats remain fully writable (`POST /chats/:chatId/messages` succeeds) regardless of post status. `ChatsService.sendMessage()` was untouched.
+- **Testing & Verification:**
+  - Unit tests: 32 tests passing across 6 suites, including 8 tests in `src/posts/phone-visibility.util.spec.ts`.
+  - E2E tests: 163 tests passing across 10 suites, including 27 tests in `test/reservation.e2e-spec.ts` (covering reservation, completion, state-machine rejections, authorization, phone gating, chat persistence) and 3 tests in `test/reservation-realtime.e2e-spec.ts` (Socket.IO push events).
+  - Realtime test stability: resolved a client/server handshake-timing race in `chats-realtime.e2e-spec.ts` and `reservation-realtime.e2e-spec.ts` where a client's transport `connect` event could fire slightly before the server-side async `handleConnection` joined the room, adding a 150ms post-connect grace period and 10000ms wait timeout. Verified across multiple consecutive full test runs.
+- **Explicitly Deferred / Out-of-Scope Future Work (Not Implemented):**
+  - **Reverting `RESERVED` post back to `ACTIVE`:** Intentionally excluded from MVP. Once a post is reserved, the only valid forward action is `Complete Listing`.
+  - **Buyer cancellation / release without completion:** Intentionally excluded from MVP.
+  - **Selecting / replacing another buyer after `RESERVED`:** Intentionally excluded from MVP ("Only one reservation may exist per post"). Reselecting while `RESERVED` returns `409 Conflict`.
+  - *Note on above items:* None of these are in MVP Scope Lock §13 (`Select Buyer, Reserve Listing, Reveal Phone Number, Complete Listing` only). Implementing them requires a dedicated future task/phase addressing cancellation semantics (clearing timestamps, whether reservation history is tracked, immediate revocation of phone visibility, and impact on other chats).
+  - **`Message.type` ('text' | 'system'):** Evaluated during the Step 0 audit. Because reservation state is already fully authoritative via `Post.status` (REST) and broadcast via `post:status-changed` (Socket.IO), mutating the `Message` schema was unnecessary. Deferred indefinitely for MVP.
+  - **`Notification` Entity:** Documented in Constitutions but scheduled for Phase 12. Not created prematurely in Phase 11.
+  - **User Blocking (`Block` model):** Scheduled for future "Reports & Safety" phase.
+  - **CORS configuration:** Scheduled for Phase 13 Admin Panel / Phase 15 Production.

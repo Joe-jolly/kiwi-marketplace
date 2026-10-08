@@ -330,11 +330,26 @@ Get Favorites
 
 Upload Post Image
 
+Select Buyer / Reserve Listing
+
+Complete Listing
+
 Posts are the primary business entity.
 
 Favorite Post and Unfavorite Post are implemented as `POST /posts/:id/favorites` and `DELETE /posts/:id/favorites` — idempotent (§24). Get Favorites ("My Favorites") is `GET /favorites`, a separate, top-level, cursor-paginated (§9) list endpoint, since it is not scoped to a single post.
 
 Upload Post Image requires authentication. The uploaded file is validated and compressed server-side before being stored in Cloudflare R2, per the Technical Constitution's File Upload Constitution and ADR-005 (Image Storage Architecture).
+
+**Amendment (Phase 11 implementation, Reservation contract):**
+
+The reservation workflow (Phase 11, Project Constitution §6/§8, Technical Constitution §19, Database Constitution §22) is implemented via two dedicated endpoints under `/posts`, paired with an authorization-gated seller phone visibility rule on post and chat reads, and a lightweight Socket.IO push event:
+
+* Select Buyer & Reserve Listing — `POST /posts/:id/reservation` (body: `{ chatId: string }`, status `201 Created`). Authenticated, post owner only (`403 Forbidden` for non-owners). Requires the post to currently be in `ACTIVE` status (`409 Conflict` if the post is in any other status, including already `RESERVED` — "Only one reservation may exist per post"). The target `chatId` must reference an existing chat on this same post (`404 Not Found` if the chat does not exist or belongs to a different post). Atomically transitions `Post.status → RESERVED`, records `Post.reservedChatId` (unique foreign key to `Chat`) and `Post.reservedAt = now()`. The selected buyer is derived via `reservedChat.participantId` (never redundantly stored). Returns the updated post detail (`postDetailSelect`).
+* Complete Listing — `POST /posts/:id/completion` (no body, status `201 Created`). Authenticated, post owner only (`403 Forbidden` for non-owners). Requires the post to currently be in `RESERVED` status (`409 Conflict` if the post is `ACTIVE`, `COMPLETED`, or in any other status — a completed transaction implies a prior reservation per the Core User Journey's strict linear chain; direct `ACTIVE → COMPLETED` transition is invalid). Atomically transitions `Post.status → COMPLETED`, records `Post.completedAt = now()`. Returns the updated post detail (`postDetailSelect`).
+* State Machine — The allowed lifecycle transitions are strictly `ACTIVE → RESERVED → COMPLETED`. Transitions out of order (`ACTIVE → COMPLETED`) or backward (`RESERVED → ACTIVE`), buyer cancellation/release, and buyer replacement are prohibited in the MVP flow (`409 Conflict`).
+* Seller Phone-Number Visibility Rule — One-directional: the selected buyer (`reservedChat.participantId`) gains visibility of the seller's phone number (`owner.phone`) once the post reaches `RESERVED` or `COMPLETED`. The phone number is exposed in `GET /posts/:id` (under `owner.phone`) and in `GET /chats` / `GET /chats/:chatId` (under `otherUser.phone`), evaluated dynamically via `canViewSellerPhone()`. It is never exposed to the owner themselves, to non-selected chat participants on the same post, or to unauthenticated/public callers. The reverse direction (seller seeing the buyer's phone number) is never permitted, preserving the one-directional privacy rule mandated by Technical Constitution §19 and Project Constitution §8 Rule 6.
+* Realtime Contract (Socket.IO) — Event: `post:status-changed`, payload: `{ postId: string, status: PostStatus, reservedChatId: string | null }`. Pushed best-effort to the `user:<userId>` rooms of both the post owner and the selected buyer after the REST mutation has committed to the database. REST remains the sole source of truth and fallback; Socket.IO carries no delivery guarantee.
+* Existing Chats Post-Completion — In accordance with the approved Phase 10 design, `COMPLETED` post status blocks only *new chat creation* (`POST /posts/:postId/messages` returns `409 Conflict` when no chat exists yet). Already-existing chats remain fully writable (`POST /chats/:chatId/messages` succeeds) regardless of post status.
 
 ---
 
@@ -379,12 +394,16 @@ Realtime communication uses Socket.IO.
 * Mark Chat Read — `POST /chats/:chatId/reads` (not one of the operations originally named above; required by the read-receipt design, §16 of the UI-UX Constitution — advances the caller's own read watermark).
 * A chat that exists but the caller is not part of returns `403`, not `404` — chat ids are opaque, non-enumerable UUIDs, unlike e.g. a hidden post, so there is no existence-hiding benefit to a blanket 404 here.
 
-Realtime contract (Socket.IO): every authenticated socket joins a single room, `user:<userId>`, on connect — there is no per-chat room and no client-emitted business event. The server pushes two events, both mirroring the REST response shapes above and delivered to both sides of the chat:
+Realtime contract (Socket.IO): every authenticated socket joins a single room, `user:<userId>`, on connect — there is no per-chat room and no client-emitted business event. The server pushes events mirroring the REST response shapes above to the involved users' rooms:
 
 * `message:new` — `{ id, chatId, senderId, content, createdAt }`, emitted after a `POST .../messages` call has already committed.
 * `chat:read` — `{ chatId, readByUserId, readAt }`, emitted after a `POST /chats/:chatId/reads` call has already committed.
+* `post:status-changed` — `{ postId, status, reservedChatId }`, emitted after a post's status transitions to `RESERVED` or `COMPLETED` (Phase 11 Reservation), pushed to both the owner and the selected buyer.
 
 REST remains the sole source of truth. Socket.IO carries no delivery guarantee and no message replay: a client that misses events while disconnected catches up entirely through the cursor-paginated REST endpoints above on reconnect, not through any Socket.IO-side backlog.
+
+Phone Visibility in Chat (Phase 11 Reservation):
+When a post is in `RESERVED` or `COMPLETED` status, `GET /chats` and `GET /chats/:chatId` dynamically expose `otherUser.phone` (the seller's phone number) to the selected buyer (`participantId === reservedChat.participantId`). For all other callers and statuses, the phone number is stripped before the response is returned. The seller never sees the buyer's phone number.
 
 Business Rule:
 
