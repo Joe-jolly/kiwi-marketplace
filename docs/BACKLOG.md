@@ -171,3 +171,13 @@ These three items were surfaced while designing Chat/the realtime layer but are 
   - **`Notification` Entity:** Documented in Constitutions but scheduled for Phase 12. Not created prematurely in Phase 11.
   - **User Blocking (`Block` model):** Scheduled for future "Reports & Safety" phase.
   - **CORS configuration:** Scheduled for Phase 13 Admin Panel / Phase 15 Production.
+
+## Notifications (Phase 12)
+
+- **Persistent System Notifications:** Created `Notification` entity linked to `User`, `Post`, and `Chat` with a `NotificationType` enum. Implemented during Phase 12 to capture system events (e.g., `RESERVATION_CREATED`).
+- **REST API:** Delivered `GET /notifications` (cursor-paginated), `GET /notifications/unread-count`, `PATCH /notifications/:id/read` (idempotent), and `POST /notifications/read-all`.
+- **Realtime Socket.IO Delivery:** Extracted notification records are broadcast via a `notification:new` event into the existing per-user `user:<id>` socket rooms managed by `ChatsGateway`.
+- **DeviceToken Management:** Created `DeviceToken` model to store push notification endpoints per platform. Implemented `POST /users/me/device-tokens` (handling hand-me-down tokens via upsert mapping logic) and `DELETE /users/me/device-tokens/:token`.
+- **PushService Mock & Phase 14 Deferral:** Built an internal `PushService` interface handling fire-and-forget push deliveries. **Important:** The backend is currently integrated with a mock provider (logging payloads to stdout). The actual integration of real cloud providers like FCM (Firebase Cloud Messaging) or APNs is deliberately deferred to Phase 14 (Mobile App) when the client application exists to generate valid tokens.
+- **Message Architecture Integrity:** Chat message receipts remain un-duplicated. Phase 10's chat unread watermarks continue unchanged. A new chat message triggers `notification:new` (Socket) and `PushService.sendPushNotification` (Push) to the recipient, but deliberately bypasses the `Notification` database table to prevent maintaining two contradictory unread states for the same data.
+- **Reservation Integration:** The `selectBuyer` (Phase 11) mutation is upgraded to atomically write a `RESERVATION_CREATED` system notification inside its primary Postgres transaction, assuring delivery upon successful completion.

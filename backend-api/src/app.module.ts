@@ -8,6 +8,8 @@ import { PostsModule } from './posts/posts.module';
 import { FavoritesModule } from './favorites/favorites.module';
 import { ChatsModule } from './chats/chats.module';
 import { StorageModule } from './storage/storage.module';
+import { PushModule } from './push/push.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 // `StorageModule` is `@Global()` (like `PrismaModule`), but Nest still
 // requires every module to be imported somewhere in the graph for its
@@ -22,6 +24,8 @@ import { StorageModule } from './storage/storage.module';
     PostsModule,
     FavoritesModule,
     ChatsModule,
+    PushModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

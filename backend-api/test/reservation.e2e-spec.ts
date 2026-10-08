@@ -21,6 +21,7 @@ describe('Phase 11 Reservation (e2e)', () => {
   let ownerToken: string;
   let ownerId: string;
   let buyerToken: string;
+  let buyerId: string;
   let otherBuyerToken: string;
   let strangerToken: string;
 
@@ -69,13 +70,14 @@ describe('Phase 11 Reservation (e2e)', () => {
     });
     ownerId = owner.id;
 
-    await prisma.user.create({
+    const buyer = await prisma.user.create({
       data: {
         phone: '__reservation_buyer__',
         passwordHash,
         displayName: 'Buyer',
       },
     });
+    buyerId = buyer.id;
 
     await prisma.user.create({
       data: {
@@ -224,6 +226,14 @@ describe('Phase 11 Reservation (e2e)', () => {
       expect(row.status).toBe(PostStatus.RESERVED);
       expect(row.reservedChatId).toBe(chat.chatId);
       expect(row.reservedAt).not.toBeNull();
+
+      // Verify persistent system notification was created for the buyer
+      const notifications = await prisma.notification.findMany({
+        where: { userId: buyerId, postId: post.id },
+      });
+      expect(notifications.length).toBe(1);
+      expect(notifications[0].type).toBe('RESERVATION_CREATED');
+      expect(notifications[0].isRead).toBe(false);
     });
 
     it('rejects a non-owner selecting a buyer', async () => {

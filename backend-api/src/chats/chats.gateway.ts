@@ -148,6 +148,10 @@ export class ChatsGateway implements OnGatewayConnection {
     this.emitToUsers(userIds, 'post:status-changed', payload);
   }
 
+  notifyNewNotification(userId: string, notification: any): void {
+    this.emitToUsers([userId], 'notification:new', notification);
+  }
+
   private extractToken(client: Socket): string | undefined {
     const token = client.handshake.auth?.token as unknown;
     return typeof token === 'string' && token.length > 0 ? token : undefined;

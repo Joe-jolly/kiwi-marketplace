@@ -51,6 +51,8 @@ model User {
   favorites          Favorite[]
   chatsAsParticipant Chat[]
   sentMessages       Message[]
+  notifications      Notification[]
+  deviceTokens       DeviceToken[]
 }
 
 model Category {
@@ -121,9 +123,10 @@ model Post {
   reservedAt     DateTime?
   completedAt    DateTime?
 
-  images    PostImage[]
-  favorites Favorite[]
-  chats     Chat[]
+  images        PostImage[]
+  favorites     Favorite[]
+  chats         Chat[]
+  notifications Notification[]
 
   @@index([ownerId])
   @@index([categoryId])
@@ -202,6 +205,8 @@ model Chat {
   // back-reference, not an independent constraint.
   reservedForPost Post? @relation("ReservedChat")
 
+  notifications Notification[]
+
   @@unique([postId, participantId])
   @@index([participantId])
 }
@@ -222,4 +227,36 @@ model Message {
   createdAt DateTime @default(now())
 
   @@index([chatId, createdAt])
+}
+enum NotificationType {
+  RESERVATION_CREATED
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String
+  postId    String?
+  post      Post?            @relation(fields: [postId], references: [id], onDelete: Cascade)
+  chatId    String?
+  chat      Chat?            @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, isRead])
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  platform  String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }

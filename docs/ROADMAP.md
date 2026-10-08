@@ -161,9 +161,13 @@
 
 ## Phase 12 - Notifications
 
-- [ ] Notification Entity
-- [ ] Notification API
-- [ ] Push Notification
+- [x] Persistent System Notifications
+- [x] Notification API (Cursor Pagination, Unread Counts, Read-All)
+- [x] Realtime Socket.IO Delivery (`notification:new`)
+- [x] DeviceToken Management (Registration, Hand-me-downs, Unregistration)
+- [x] Internal `PushService` Abstraction
+
+> **Note:** The actual integration of a real push provider (e.g., Firebase Cloud Messaging or APNs) is deferred to Phase 14 (Mobile App) when the client is implemented. The backend currently uses a mocked internal provider interface.
 
 ---
 

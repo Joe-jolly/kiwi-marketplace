@@ -30,6 +30,7 @@ import { GeoFeedQueryBuilder, GeoFeedRow } from './feed/geo-feed-query.builder';
 import { SortOption } from './feed/sort-option.enum';
 import { canViewSellerPhone } from './phone-visibility.util';
 import { isPostHiddenFromPublic } from './post-visibility.util';
+import { PushService } from '../push/push.service';
 import {
   postDetailSelect,
   postDetailWithPhoneSelect,
@@ -78,6 +79,7 @@ export class PostsService {
     private readonly geoFeedQueryBuilder: GeoFeedQueryBuilder,
     private readonly storageService: StorageService,
     private readonly chatsGateway: ChatsGateway,
+    private readonly pushService: PushService,
   ) {}
 
   async findAll(query: FindPostsQueryDto) {
@@ -612,30 +614,55 @@ export class PostsService {
       throw new NotFoundException('Chat not found for this post');
     }
 
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const post = await tx.post.findUnique({
-        where: { id: postId },
-        select: reservablePostSelect,
-      });
+    const { updated, notification } = await this.prisma.$transaction(
+      async (tx) => {
+        const post = await tx.post.findUnique({
+          where: { id: postId },
+          select: reservablePostSelect,
+        });
 
-      this.assertPostCanBeReserved(post, user);
+        this.assertPostCanBeReserved(post, user);
 
-      return tx.post.update({
-        where: { id: post.id },
-        data: {
-          reservedChatId: chat.id,
-          reservedAt: new Date(),
-          status: PostStatus.RESERVED,
-        },
-        select: postDetailSelect,
-      });
-    });
+        const updated = await tx.post.update({
+          where: { id: post.id },
+          data: {
+            reservedChatId: chat.id,
+            reservedAt: new Date(),
+            status: PostStatus.RESERVED,
+          },
+          select: postDetailSelect,
+        });
+
+        const notification = await tx.notification.create({
+          data: {
+            userId: chat.participantId,
+            type: 'RESERVATION_CREATED',
+            title: 'Reservation Updated',
+            body: `You have been selected as the buyer for ${updated.title}. Tap to view details.`,
+            postId: updated.id,
+            chatId: chat.id,
+          },
+        });
+
+        return { updated, notification };
+      },
+    );
 
     this.chatsGateway.notifyPostStatusChanged([user.id, chat.participantId], {
       postId: updated.id,
       status: updated.status,
       reservedChatId: chat.id,
     });
+
+    this.chatsGateway.notifyNewNotification(chat.participantId, notification);
+
+    this.pushService
+      .sendPushNotification(
+        chat.participantId,
+        notification.title,
+        notification.body,
+      )
+      .catch(() => {});
 
     return resolveImageUrls(this.storageService, updated);
   }

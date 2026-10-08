@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ChatsModule } from '../chats/chats.module';
+import { PushModule } from '../push/push.module';
 import { FeedQueryBuilder } from './feed/feed-query.builder';
 import { GeoFeedQueryBuilder } from './feed/geo-feed-query.builder';
 import { PostsController } from './posts.controller';
@@ -11,7 +12,7 @@ import { PostsService } from './posts.service';
   // to emit the best-effort `post:status-changed` realtime event, reusing
   // the gateway's existing per-user-room infrastructure rather than
   // duplicating it.
-  imports: [ChatsModule],
+  imports: [ChatsModule, PushModule],
   controllers: [PostsController],
   providers: [PostsService, FeedQueryBuilder, GeoFeedQueryBuilder],
 })

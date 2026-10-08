@@ -17,6 +17,7 @@ import { mutablePostSelect } from '../posts/post.select';
 import { resolveImageUrls } from '../posts/resolve-image-urls.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { PushService } from '../push/push.service';
 import { resolveChatRole } from './chat-role.util';
 import { ChatsGateway } from './chats.gateway';
 import {
@@ -44,6 +45,7 @@ export class ChatsService {
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
     private readonly chatsGateway: ChatsGateway,
+    private readonly pushService: PushService,
   ) {}
 
   /**
@@ -332,6 +334,13 @@ export class ChatsService {
     });
 
     this.chatsGateway.notifyNewMessage(participantUserIds, message);
+
+    const recipientId = participantUserIds.find((id) => id !== senderId);
+    if (recipientId) {
+      this.pushService
+        .sendPushNotification(recipientId, 'New Message', content)
+        .catch(() => {});
+    }
 
     return message;
   }
